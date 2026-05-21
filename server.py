@@ -1,13 +1,13 @@
-import os
 from flask import Flask, request
 import requests
+import os
 
 app = Flask(__name__)
 
-TOKEN = "TU_TOKEN_TELEGRAM"
-CHAT_ID = "TU_CHAT_ID"
+TOKEN = os.getenv("TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")
 
-@app.route("/", methods=["GET"])
+@app.route("/")
 def home():
     return "IMPULXOR IA ONLINE"
 
@@ -24,16 +24,16 @@ PRICE: {data.get('price')}
 TF: {data.get('tf')}
 """
 
-    requests.post(
-        f"https://api.telegram.org/bot{TOKEN}/sendMessage",
-        json={
-            "chat_id": CHAT_ID,
-            "text": text
-        }
-    )
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+
+    payload = {
+        "chat_id": CHAT_ID,
+        "text": text
+    }
+
+    requests.post(url, json=payload)
 
     return {"ok": True}
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=8080)
