@@ -13,15 +13,22 @@ def home():
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
+
     data = request.json
 
     text = f"""
-🔥 IMPULXOR ALERTA
+🚨 IMPULXOR IA 🚨
 
-SYMBOL: {data.get('ticker')}
-SIGNAL: {data.get('signal')}
-PRICE: {data.get('price')}
-TF: {data.get('tf')}
+{data.get('ticker')} ORDEN PENDIENTE {data.get('type')}
+
+📍 PRECIO: {data.get('entry')}
+
+🛑 STOPLOSS: {data.get('sl')}
+
+🎯 TP1: {data.get('tp1')}
+🎯 TP2: {data.get('tp2')}
+
+⚡ {data.get('risk')}
 """
 
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
