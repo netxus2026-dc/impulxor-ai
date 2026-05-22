@@ -16,31 +16,22 @@ def webhook():
 
     data = request.json
 
-    text = f"""
+signal = data.get("signal", "WAIT")
+price = data.get("price", "N/A")
+entry_zone = data.get("entry_zone", "N/A")
+runner = data.get("runner", "N/A")
+risk = data.get("risk", "N/A")
+
+text = f"""
 🚨 IMPULXOR IA 🚨
 
-{data.get('ticker')} ORDEN PENDIENTE {data.get('type')}
+📊 SEÑAL: {signal}
 
-📍 PRECIO: {data.get('entry')}
+📍 PRECIO: {price}
 
-🛑 STOPLOSS: {data.get('sl')}
+📦 ZONA: {entry_zone}
 
-🎯 TP1: {data.get('tp1')}
-🎯 TP2: {data.get('tp2')}
+🎯 RUNNER: {runner}
 
-⚡ {data.get('risk')}
+⚡ RIESGO: {risk}
 """
-
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": text
-    }
-
-    requests.post(url, json=payload)
-
-    return {"ok": True}
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
