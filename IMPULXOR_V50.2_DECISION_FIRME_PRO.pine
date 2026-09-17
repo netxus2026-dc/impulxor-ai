@@ -1,0 +1,2000 @@
+//@version=6
+indicator("IMPULXOR V50.2 DECISION FIRME PRO", shorttitle="IMPULXOR V50.2", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=250)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V50.2 DECISION FIRME PRO
+// - Conserva estrellas, paneles, caja, Entry/SL/TP1-TP5 y tabla TF.
+// - Normaliza el score por familias para reducir doble conteo.
+// - Agrega Fibonacci de impulso 38.2/50/61.8/70.5/78.6.
+// - Agrega POI Quality 0-5 y secuencia de decisión firme.
+// - La entrada fuerte exige estructura + ubicación + gatillo; el score solo mide calidad.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// IMPULXOR CORE V39.2
+// PANEL PRINCIPAL + TABLA TF SEPARADA
+// - Mantiene caja del gráfico con zona DESDE/HASTA.
+// - Mantiene ENTRY / SL / TP1-TP5.
+// - Integra lo faltante de tus imágenes:
+//   DECISIÓN IA, MODO, FUERZA, FASE VIVA, ACCIÓN,
+//   NO ENTRAR DESPUÉS, PUNTO REAL, TRAMPA,
+//   BUY/SELL SCORE, NOTA, ORIGEN IMPULSO,
+//   DESDE → HASTA LARGO, SIGUIENTE REACCIÓN,
+//   RUNNER LARGO, LECTURA MADRE.
+// - Tabla TF M1/M5/M15/M30/H1/H4/D separada como la imagen.
+// - El panel principal NO repite los TF.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+//━━━━━━━━━━━━━━━━━━
+// INPUTS
+//━━━━━━━━━━━━━━━━━━
+grpBase = "01. BASE"
+emaFastLen  = input.int(9, "EMA 9", group=grpBase, display=display.none)
+emaMidLen   = input.int(21, "EMA 21", group=grpBase, display=display.none)
+emaSlowLen  = input.int(50, "EMA 50", group=grpBase, display=display.none)
+emaMacroLen = input.int(200, "EMA 200", group=grpBase, display=display.none)
+rsiLen      = input.int(14, "RSI", group=grpBase, display=display.none)
+atrLen      = input.int(14, "ATR", group=grpBase, display=display.none)
+adxLen      = input.int(14, "ADX", group=grpBase, display=display.none)
+
+grpEngine = "02. MOTOR"
+liqLookback        = input.int(36, "Lookback liquidez", minval=10, maxval=250, group=grpEngine, display=display.none)
+liqSwingFast       = input.int(12, "Swing rápido", minval=5, maxval=80, group=grpEngine, display=display.none)
+liqSwingSlow       = input.int(72, "Swing lento", minval=30, maxval=250, group=grpEngine, display=display.none)
+zoneAtr            = input.float(0.45, "Altura zona x ATR", step=0.05, group=grpEngine, display=display.none)
+maxFomoAtr         = input.float(0.95, "Máx NO FOMO x ATR", step=0.05, group=grpEngine, display=display.none)
+minEntrySoft       = input.int(61, "Entrada suave desde %", minval=40, maxval=100, group=grpEngine, display=display.none)
+minEntryStrong     = input.int(76, "Entrada fuerte desde %", minval=50, maxval=100, group=grpEngine, display=display.none)
+minExplosiveScore  = input.int(84, "Explosivo desde %", minval=60, maxval=100, group=grpEngine, display=display.none)
+masterGap          = input.int(13, "Gap para cambiar dirección", minval=5, maxval=40, group=grpEngine, display=display.none)
+holdBarsMin        = input.int(3, "Velas mínimas HOLD", minval=1, maxval=40, group=grpEngine, display=display.none)
+confirmReverseBars = input.int(1, "Confirmación cambio", minval=1, maxval=6, group=grpEngine, display=display.none)
+
+grpPlan = "03. PLAN"
+slAtr      = input.float(1.20, "SL ATR", step=0.05, group=grpPlan, display=display.none)
+tp1Atr     = input.float(1.20, "TP1 ATR", step=0.05, group=grpPlan, display=display.none)
+tp2Atr     = input.float(2.20, "TP2 ATR", step=0.10, group=grpPlan, display=display.none)
+tp3Atr     = input.float(3.20, "TP3 ATR", step=0.10, group=grpPlan, display=display.none)
+tp4Atr     = input.float(4.20, "TP4 ATR", step=0.10, group=grpPlan, display=display.none)
+tp5Atr     = input.float(5.20, "TP5 ATR", step=0.10, group=grpPlan, display=display.none)
+nearAtr    = input.float(0.35, "Aviso soporte/resistencia cerca", step=0.05, group=grpPlan, display=display.none)
+
+grpVisual = "04. VISUAL"
+showOnePanel  = input.bool(true, "Mostrar único panel fusionado", group=grpVisual, display=display.none)
+showMapBox    = input.bool(true, "Mostrar caja mapa", group=grpVisual, display=display.none)
+showTPLevels  = input.bool(true, "Mostrar líneas Entry/SL/TP", group=grpVisual, display=display.none)
+showLiveLabel = input.bool(true, "Mostrar aviso vivo", group=grpVisual, display=display.none)
+panelSize     = input.string("Medio", "Tamaño panel", options=["Pequeño","Medio","Grande"], group=grpVisual, display=display.none)
+boxBarsRight  = input.int(58, "Caja ancho derecha", minval=30, maxval=120, group=grpVisual, display=display.none)
+showTfPanel   = input.bool(true, "Tabla TF separada", group=grpVisual, display=display.none)
+
+grpICT = "05. ICT FORMAL"
+ictMssLookback = input.int(5, "MSS lookback", minval=2, maxval=20, group=grpICT, display=display.none)
+ictDealingLen  = input.int(20, "Internal dealing range", minval=10, maxval=80, group=grpICT, display=display.none)
+ictDispAtr     = input.float(0.75, "Displacement mínimo x ATR", step=0.05, group=grpICT, display=display.none)
+ictOteMin      = input.float(0.62, "OTE mínimo", step=0.01, minval=0.50, maxval=0.79, group=grpICT, display=display.none)
+ictOteMax      = input.float(0.79, "OTE máximo", step=0.01, minval=0.62, maxval=0.90, group=grpICT, display=display.none)
+ictUseKillzone = input.bool(true, "Usar Killzones como calidad", group=grpICT, display=display.none)
+ictTz          = input.string("America/New_York", "Zona horaria ICT", group=grpICT, display=display.none)
+ictLondon      = input.session("0200-0500", "London Killzone", group=grpICT, display=display.none)
+ictNewYork     = input.session("0700-1000", "New York Killzone", group=grpICT, display=display.none)
+ictLondonClose = input.session("1000-1200", "London Close", group=grpICT, display=display.none)
+
+grpFractal = "06. PREVIOUS DAY / FRACTAL"
+showPrevDayMap = input.bool(true, "Mostrar PDH/PDL/EQ", group=grpFractal, display=display.none)
+fractalMinAlign = input.int(4, "Alineación fractal mínima", minval=2, maxval=5, group=grpFractal, display=display.none)
+prevDayRaidAtr = input.float(0.10, "Tolerancia raid PDH/PDL x ATR", step=0.05, minval=0.0, maxval=1.0, group=grpFractal, display=display.none)
+
+//━━━━━━━━━━━━━━━━━━
+// BASE
+//━━━━━━━━━━━━━━━━━━
+ema9   = ta.ema(close, emaFastLen)
+ema21  = ta.ema(close, emaMidLen)
+ema50  = ta.ema(close, emaSlowLen)
+ema200 = ta.ema(close, emaMacroLen)
+rsi    = ta.rsi(close, rsiLen)
+atr    = ta.atr(atrLen)
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxLen)
+
+body = math.abs(close - open)
+bodySafe = body == 0.0 ? syminfo.mintick : body
+rng = math.max(high - low, syminfo.mintick)
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+closeNearHigh = (high - close) / rng < 0.28
+closeNearLow  = (close - low) / rng < 0.28
+
+//━━━━━━━━━━━━━━━━━━
+// MTF
+//━━━━━━━━━━━━━━━━━━
+f_dir(tf) =>
+    c   = request.security(syminfo.tickerid, tf, close, barmerge.gaps_off, barmerge.lookahead_off)
+    e9  = request.security(syminfo.tickerid, tf, ta.ema(close, emaFastLen), barmerge.gaps_off, barmerge.lookahead_off)
+    e21 = request.security(syminfo.tickerid, tf, ta.ema(close, emaMidLen), barmerge.gaps_off, barmerge.lookahead_off)
+    rr  = request.security(syminfo.tickerid, tf, ta.rsi(close, rsiLen), barmerge.gaps_off, barmerge.lookahead_off)
+    c > e9 and e9 > e21 and rr > 50 ? 1 : c < e9 and e9 < e21 and rr < 50 ? -1 : 0
+
+f_rsi(tf) =>
+    request.security(syminfo.tickerid, tf, ta.rsi(close, rsiLen), barmerge.gaps_off, barmerge.lookahead_off)
+
+d1   = f_dir("1")
+d5   = f_dir("5")
+d15  = f_dir("15")
+d30  = f_dir("30")
+d60  = f_dir("60")
+d240 = f_dir("240")
+dD   = f_dir("D")
+
+r1   = f_rsi("1")
+r5   = f_rsi("5")
+r15  = f_rsi("15")
+r30  = f_rsi("30")
+r60  = f_rsi("60")
+r240 = f_rsi("240")
+rD   = f_rsi("D")
+
+// H3 institucional: una sola solicitud MTF para conservar eficiencia.
+[h3Close, h3E9, h3E21, r180, h3HighRaw, h3LowRaw, h3Atr] = request.security(syminfo.tickerid, "180", [close, ta.ema(close, emaFastLen), ta.ema(close, emaMidLen), ta.rsi(close, rsiLen), ta.highest(high[1], 36), ta.lowest(low[1], 36), ta.atr(atrLen)], barmerge.gaps_off, barmerge.lookahead_off)
+d180 = h3Close > h3E9 and h3E9 > h3E21 and r180 > 50 ? 1 : h3Close < h3E9 and h3E9 < h3E21 and r180 < 50 ? -1 : 0
+
+mtfBuy  = (d1 == 1 ? 8 : 0) + (d5 == 1 ? 18 : 0) + (d15 == 1 ? 22 : 0) + (d30 == 1 ? 12 : 0) + (d60 == 1 ? 12 : 0) + (d180 == 1 ? 10 : 0) + (d240 == 1 ? 8 : 0) + (dD == 1 ? 8 : 0)
+mtfSell = (d1 == -1 ? 8 : 0) + (d5 == -1 ? 18 : 0) + (d15 == -1 ? 22 : 0) + (d30 == -1 ? 12 : 0) + (d60 == -1 ? 12 : 0) + (d180 == -1 ? 10 : 0) + (d240 == -1 ? 8 : 0) + (dD == -1 ? 8 : 0)
+
+//━━━━━━━━━━━━━━━━━━
+// LIQUIDEZ / ZONAS
+//━━━━━━━━━━━━━━━━━━
+[dayHigh, dayLow, prevDayHigh, prevDayLow, prevDayClose] = request.security(syminfo.tickerid, "D", [high, low, high[1], low[1], close[1]], barmerge.gaps_off, barmerge.lookahead_off)
+dayRange = math.max(dayHigh - dayLow, syminfo.mintick)
+fib31 = dayLow + dayRange * 0.31
+fib50 = dayLow + dayRange * 0.50
+fib68 = dayLow + dayRange * 0.68
+
+liqHigh = ta.highest(high[1], liqLookback)
+liqLow  = ta.lowest(low[1], liqLookback)
+liqHighFast = ta.highest(high[1], liqSwingFast)
+liqLowFast  = ta.lowest(low[1], liqSwingFast)
+liqHighSlow = ta.highest(high[1], liqSwingSlow)
+liqLowSlow  = ta.lowest(low[1], liqSwingSlow)
+
+upperLiquidity = math.max(liqHigh, math.max(liqHighFast, liqHighSlow))
+lowerLiquidity = math.min(liqLow, math.min(liqLowFast, liqLowSlow))
+
+buyBaseLow  = math.min(lowerLiquidity - atr * zoneAtr, ema21 - atr * 0.35)
+buyBaseHigh = math.max(lowerLiquidity + atr * zoneAtr, ema21 + atr * 0.35)
+buyZoneFrom = math.min(buyBaseLow, fib31)
+buyZoneTo   = math.max(buyBaseHigh, fib50)
+
+sellBaseLow  = math.min(upperLiquidity - atr * zoneAtr, ema21 - atr * 0.35)
+sellBaseHigh = math.max(upperLiquidity + atr * zoneAtr, ema21 + atr * 0.35)
+sellZoneFrom = math.min(sellBaseLow, fib50)
+sellZoneTo   = math.max(sellBaseHigh, fib68)
+
+inBuyZone  = low <= buyZoneTo and high >= buyZoneFrom
+inSellZone = high >= sellZoneFrom and low <= sellZoneTo
+
+//━━━━━━━━━━━━━━━━━━
+// CANAL / SOP RES
+//━━━━━━━━━━━━━━━━━━
+channelLen = 34
+chHigh = ta.highest(high, channelLen)
+chLow  = ta.lowest(low, channelLen)
+chRange = math.max(chHigh - chLow, syminfo.mintick)
+chSlope = ta.linreg(close, channelLen, 0) - ta.linreg(close, channelLen, 1)
+channelDir = chSlope > atr * 0.015 ? 1 : chSlope < -atr * 0.015 ? -1 : 0
+inChannel = chRange <= atr * 8.0
+channelTxt = channelDir == 1 ? "CANAL BUY" : channelDir == -1 ? "CANAL SELL" : inChannel ? "CANAL LATERAL" : "SIN CANAL"
+
+supportTouch = low <= chLow + atr * 0.30 or inBuyZone
+resistTouch  = high >= chHigh - atr * 0.30 or inSellZone
+
+supportStrength = math.round(math.min(100.0, math.max(0.0, 35.0 + (supportTouch ? 25.0 : 0.0) + (lowerWick > bodySafe ? 15.0 : 0.0) + (d15 == 1 ? 15.0 : 0.0) + (diPlus > diMinus ? 10.0 : 0.0))))
+resistStrength  = math.round(math.min(100.0, math.max(0.0, 35.0 + (resistTouch ? 25.0 : 0.0) + (upperWick > bodySafe ? 15.0 : 0.0) + (d15 == -1 ? 15.0 : 0.0) + (diMinus > diPlus ? 10.0 : 0.0))))
+
+nearSupport = math.abs(close - chLow) <= atr * nearAtr or math.abs(close - buyZoneTo) <= atr * nearAtr
+nearResist  = math.abs(close - chHigh) <= atr * nearAtr or math.abs(close - sellZoneFrom) <= atr * nearAtr
+
+//━━━━━━━━━━━━━━━━━━
+// FLOW
+//━━━━━━━━━━━━━━━━━━
+volSafe = nz(volume, 1.0)
+clv = ((close - low) - (high - close)) / rng
+flowRaw = clv * volSafe
+flowFast = ta.ema(flowRaw, 3)
+flowSlow = ta.ema(flowRaw, 13)
+flowAbsMa = math.max(ta.sma(math.abs(flowRaw), 20), 1.0)
+
+buyPressure  = flowFast > flowSlow and flowFast > 0
+sellPressure = flowFast < flowSlow and flowFast < 0
+
+pressureBuyScore  = math.max(0.0, math.min(100.0, 50.0 + flowFast / flowAbsMa * 25.0))
+pressureSellScore = math.max(0.0, math.min(100.0, 50.0 - flowFast / flowAbsMa * 25.0))
+
+deltaSynthetic = math.round(flowFast / flowAbsMa * 12.0)
+deltaAccelerationBuy  = flowFast > flowFast[1] and buyPressure
+deltaAccelerationSell = flowFast < flowFast[1] and sellPressure
+pocDefendedBuy  = close > ema9 and lowerWick > bodySafe * 0.45 and buyPressure
+pocDefendedSell = close < ema9 and upperWick > bodySafe * 0.45 and sellPressure
+
+//━━━━━━━━━━━━━━━━━━
+// MICROESTRUCTURA
+//━━━━━━━━━━━━━━━━━━
+compression = ta.sma(rng, 5) < ta.sma(rng, 20) * 0.78 and ta.highest(rng, 5) < atr * 1.10
+adxWake = adx > adx[1] and adx[1] >= adx[2] and adx > 14
+
+sweepDown = low < lowerLiquidity - atr * 0.04 and close > lowerLiquidity
+sweepUp   = high > upperLiquidity + atr * 0.04 and close < upperLiquidity
+
+microBosBuy  = close > ta.highest(high[1], 3)
+microBosSell = close < ta.lowest(low[1], 3)
+
+absorbBuy  = inBuyZone and (lowerWick > bodySafe * 0.70 or sweepDown) and close > low + rng * 0.55 and (buyPressure or diPlus >= diMinus)
+absorbSell = inSellZone and (upperWick > bodySafe * 0.70 or sweepUp) and close < high - rng * 0.55 and (sellPressure or diMinus >= diPlus)
+
+seqAbsorbBuy  = math.sum(lowerWick > bodySafe * 0.50 and close > low + rng * 0.45 ? 1.0 : 0.0, 3) >= 2
+seqAbsorbSell = math.sum(upperWick > bodySafe * 0.50 and close < high - rng * 0.45 ? 1.0 : 0.0, 3) >= 2
+
+trapBuy  = sweepDown and close > open and (absorbBuy or seqAbsorbBuy or pocDefendedBuy)
+trapSell = sweepUp and close < open and (absorbSell or seqAbsorbSell or pocDefendedSell)
+
+//━━━━━━━━━━━━━━━━━━
+// RETROCESO
+//━━━━━━━━━━━━━━━━━━
+buyPullFrom  = math.min(ema9, ema21)
+buyPullTo    = math.max(ema9, ema21) + atr * 0.35
+sellPullFrom = math.min(ema9, ema21) - atr * 0.35
+sellPullTo   = math.max(ema9, ema21)
+
+buyTrendAlive  = close > ema21 and ema9 >= ema21 and (d5 == 1 or d15 == 1 or mtfBuy > mtfSell)
+sellTrendAlive = close < ema21 and ema9 <= ema21 and (d5 == -1 or d15 == -1 or mtfSell > mtfBuy)
+
+buyPullback  = buyTrendAlive and close >= buyPullFrom - atr * 0.25 and close <= buyPullTo + atr * 0.25
+sellPullback = sellTrendAlive and close <= sellPullTo + atr * 0.25 and close >= sellPullFrom - atr * 0.25
+
+buyPullbackDying  = buyPullback and upperWick < upperWick[1] and body <= body[1] * 1.15 and not sellPressure and close >= ema9 - atr * 0.15
+sellPullbackDying = sellPullback and lowerWick < lowerWick[1] and body <= body[1] * 1.15 and not buyPressure and close <= ema9 + atr * 0.15
+
+buyContinuation  = buyTrendAlive and (buyPullbackDying or absorbBuy or seqAbsorbBuy or microBosBuy or pocDefendedBuy) and diPlus >= diMinus
+sellContinuation = sellTrendAlive and (sellPullbackDying or absorbSell or seqAbsorbSell or microBosSell or pocDefendedSell) and diMinus >= diPlus
+
+//━━━━━━━━━━━━━━━━━━
+// NO FOMO / IMPULSO
+//━━━━━━━━━━━━━━━━━━
+buyDistATR  = atr > 0 ? math.max(0.0, close - buyZoneTo) / atr : 999.0
+sellDistATR = atr > 0 ? math.max(0.0, sellZoneFrom - close) / atr : 999.0
+
+buyNoFomo  = buyDistATR <= maxFomoAtr and (close - ema9) <= atr * 1.15
+sellNoFomo = sellDistATR <= maxFomoAtr and (ema9 - close) <= atr * 1.15
+
+buyImpulse  = close > open and body >= atr * 0.18 and closeNearHigh and close > ema9
+sellImpulse = close < open and body >= atr * 0.18 and closeNearLow and close < ema9
+
+//━━━━━━━━━━━━━━━━━━
+// MEJORA INTERNA V39.2 - SIN CAMBIAR LO VISUAL
+// Anticipa impulso desde mecha/compresión/flow y bloquea entradas agotadas.
+//━━━━━━━━━━━━━━━━━━
+velBody = math.abs(close - close[1])
+velMa = math.max(ta.sma(math.abs(close - close[1]), 14), syminfo.mintick)
+velocityWakeBuy  = close > close[1] and velBody > velMa * 1.15 and close > open
+velocityWakeSell = close < close[1] and velBody > velMa * 1.15 and close < open
+rangeExpansion = rng > ta.sma(rng, 20) * 1.05 or body > ta.sma(body, 20) * 1.18
+microCloseBuy  = close > low + rng * 0.62 and close > open and lowerWick >= upperWick * 0.70
+microCloseSell = close < high - rng * 0.62 and close < open and upperWick >= lowerWick * 0.70
+hiddenAccumBuy  = (compression or compression[1]) and (sweepDown or absorbBuy or seqAbsorbBuy or pocDefendedBuy) and (buyPressure or deltaAccelerationBuy or velocityWakeBuy)
+hiddenDistribSell = (compression or compression[1]) and (sweepUp or absorbSell or seqAbsorbSell or pocDefendedSell) and (sellPressure or deltaAccelerationSell or velocityWakeSell)
+smartBirthBuy  = hiddenAccumBuy and (microCloseBuy or microBosBuy or adxWake or rangeExpansion) and (d5 == 1 or d15 == 1 or mtfBuy >= mtfSell)
+smartBirthSell = hiddenDistribSell and (microCloseSell or microBosSell or adxWake or rangeExpansion) and (d5 == -1 or d15 == -1 or mtfSell >= mtfBuy)
+lateBuyExhaustion = close > ema21 + atr * 1.85 and upperWick > bodySafe * 0.85 and not buyPressure
+lateSellExhaustion = close < ema21 - atr * 1.85 and lowerWick > bodySafe * 0.85 and not sellPressure
+antiTopBuy = nearResist and resistStrength >= 70 and not microBosBuy and not smartBirthBuy
+antiBottomSell = nearSupport and supportStrength >= 70 and not microBosSell and not smartBirthSell
+smartBuyAllowed = smartBirthBuy and not lateBuyExhaustion and not antiTopBuy
+smartSellAllowed = smartBirthSell and not lateSellExhaustion and not antiBottomSell
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// IMPULXOR V47 MACRO RANGE + LIQUIDITY MAP ENGINE
+// AGREGADO SOLO A LA LÓGICA. NO TOCA PANELES, CAJAS, TABLAS NI VISUAL.
+// Objetivo: leer como tus imágenes: rango madre, barrida, manipulación,
+// reacción en zona, rompimiento, pullback y continuación zona a zona.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+macroLookbackD = 30
+macroLookbackH4 = 42
+macroHighD = request.security(syminfo.tickerid, "D", ta.highest(high[1], macroLookbackD), barmerge.gaps_off, barmerge.lookahead_off)
+macroLowD  = request.security(syminfo.tickerid, "D", ta.lowest(low[1], macroLookbackD), barmerge.gaps_off, barmerge.lookahead_off)
+macroHighH4 = request.security(syminfo.tickerid, "240", ta.highest(high[1], macroLookbackH4), barmerge.gaps_off, barmerge.lookahead_off)
+macroLowH4  = request.security(syminfo.tickerid, "240", ta.lowest(low[1], macroLookbackH4), barmerge.gaps_off, barmerge.lookahead_off)
+macroAtrD = request.security(syminfo.tickerid, "D", ta.atr(14), barmerge.gaps_off, barmerge.lookahead_off)
+macroAtrH4 = request.security(syminfo.tickerid, "240", ta.atr(14), barmerge.gaps_off, barmerge.lookahead_off)
+
+macroHigh = math.max(macroHighD, macroHighH4)
+macroLow = math.min(macroLowD, macroLowH4)
+macroRange = math.max(macroHigh - macroLow, syminfo.mintick)
+macroMid = macroLow + macroRange * 0.50
+macroDiscount = close <= macroMid
+macroPremium = close >= macroMid
+
+macroSupportFrom = macroLow
+macroSupportTo = macroLow + math.max(atr * 0.85, macroRange * 0.075)
+macroResistFrom = macroHigh - math.max(atr * 0.85, macroRange * 0.075)
+macroResistTo = macroHigh
+
+macroInSupport = low <= macroSupportTo and high >= macroSupportFrom
+macroInResist = high >= macroResistFrom and low <= macroResistTo
+macroNearSupport = math.abs(close - macroSupportTo) <= atr * 0.75 or macroInSupport
+macroNearResist = math.abs(close - macroResistFrom) <= atr * 0.75 or macroInResist
+
+macroSweepDown = low < macroSupportFrom - atr * 0.08 and close > macroSupportFrom
+macroSweepUp = high > macroResistTo + atr * 0.08 and close < macroResistTo
+macroReclaimBuy = macroSweepDown and close > macroSupportTo - atr * 0.35 and (lowerWick > bodySafe * 0.70 or closeNearHigh)
+macroRejectSell = macroSweepUp and close < macroResistFrom + atr * 0.35 and (upperWick > bodySafe * 0.70 or closeNearLow)
+
+macroBreakBuy = close > macroResistTo and body >= atr * 0.28 and (buyPressure or diPlus > diMinus)
+macroBreakSell = close < macroSupportFrom and body >= atr * 0.28 and (sellPressure or diMinus > diPlus)
+
+macroPullbackBuy = close > macroMid and low <= macroResistFrom + atr * 0.55 and close >= macroResistFrom - atr * 0.35 and not macroRejectSell
+macroPullbackSell = close < macroMid and high >= macroSupportTo - atr * 0.55 and close <= macroSupportTo + atr * 0.35 and not macroReclaimBuy
+
+macroAccumulationBuy = macroNearSupport and (macroSweepDown or absorbBuy or seqAbsorbBuy or pocDefendedBuy) and (buyPressure or deltaAccelerationBuy or adxWake)
+macroDistributionSell = macroNearResist and (macroSweepUp or absorbSell or seqAbsorbSell or pocDefendedSell) and (sellPressure or deltaAccelerationSell or adxWake)
+
+macroContinuationBuy = (macroBreakBuy or macroPullbackBuy or macroAccumulationBuy) and (d60 == 1 or d240 == 1 or dD == 1 or mtfBuy >= mtfSell) and not lateBuyExhaustion
+macroContinuationSell = (macroBreakSell or macroPullbackSell or macroDistributionSell) and (d60 == -1 or d240 == -1 or dD == -1 or mtfSell >= mtfBuy) and not lateSellExhaustion
+
+macroManipulationBuy = macroSweepDown and (trapBuy or absorbBuy or seqAbsorbBuy) and close > low + rng * 0.60
+macroManipulationSell = macroSweepUp and (trapSell or absorbSell or seqAbsorbSell) and close < high - rng * 0.60
+
+macroNoBuyTop = macroNearResist and not macroBreakBuy and not macroPullbackBuy and resistStrength >= 65
+macroNoSellBottom = macroNearSupport and not macroBreakSell and not macroPullbackSell and supportStrength >= 65
+
+macroEntryBuy = (macroContinuationBuy or macroManipulationBuy) and not macroNoBuyTop
+macroEntrySell = (macroContinuationSell or macroManipulationSell) and not macroNoSellBottom
+
+macroBiasBuy = (d60 == 1 ? 18.0 : 0.0) + (d240 == 1 ? 22.0 : 0.0) + (dD == 1 ? 18.0 : 0.0) + (macroDiscount ? 8.0 : 0.0) + (macroEntryBuy ? 22.0 : 0.0)
+macroBiasSell = (d60 == -1 ? 18.0 : 0.0) + (d240 == -1 ? 22.0 : 0.0) + (dD == -1 ? 18.0 : 0.0) + (macroPremium ? 8.0 : 0.0) + (macroEntrySell ? 22.0 : 0.0)
+macroBiasBuy := math.max(0.0, math.min(100.0, macroBiasBuy))
+macroBiasSell := math.max(0.0, math.min(100.0, macroBiasSell))
+
+macroScenario = macroEntryBuy ? 1 : macroEntrySell ? -1 : macroBiasBuy > macroBiasSell + 12 ? 1 : macroBiasSell > macroBiasBuy + 12 ? -1 : 0
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// IMPULXOR V48 — LIQUIDITY & POI INTELLIGENCE ENGINE
+// ADITIVO: H3/H4 + liquidez externa/interna + POI + pending intelligence.
+// Conserva los filtros y motores anteriores.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// 1) MOTOR MADRE H3/H4
+h3High = h3HighRaw
+h3Low = h3LowRaw
+h3Range = math.max(h3High - h3Low, syminfo.mintick)
+h3Mid = h3Low + h3Range * 0.50
+h3Discount = close <= h3Mid
+h3Premium = close >= h3Mid
+
+h4Mid = macroLowH4 + math.max(macroHighH4 - macroLowH4, syminfo.mintick) * 0.50
+h4Discount = close <= h4Mid
+h4Premium = close >= h4Mid
+
+institutionalBiasBuy = (d180 == 1 or d240 == 1) and (h3Discount or h4Discount) and not macroNoBuyTop
+institutionalBiasSell = (d180 == -1 or d240 == -1) and (h3Premium or h4Premium) and not macroNoSellBottom
+motherBias = institutionalBiasBuy and not institutionalBiasSell ? 1 : institutionalBiasSell and not institutionalBiasBuy ? -1 : d180 == d240 ? d180 : 0
+
+// 2) EXTERNAL LIQUIDITY
+externalHigh = math.max(h3High, macroHighH4)
+externalLow = math.min(h3Low, macroLowH4)
+externalSweepHigh = high > externalHigh and close < externalHigh
+externalSweepLow = low < externalLow and close > externalLow
+
+extPivotHigh = ta.pivothigh(high, 3, 3)
+extPivotLow = ta.pivotlow(low, 3, 3)
+lastExtPH = ta.valuewhen(not na(extPivotHigh), extPivotHigh, 0)
+prevExtPH = ta.valuewhen(not na(extPivotHigh), extPivotHigh, 1)
+lastExtPL = ta.valuewhen(not na(extPivotLow), extPivotLow, 0)
+prevExtPL = ta.valuewhen(not na(extPivotLow), extPivotLow, 1)
+eqTol = atr * 0.18
+externalEQH = not na(lastExtPH) and not na(prevExtPH) and math.abs(lastExtPH - prevExtPH) <= eqTol
+externalEQL = not na(lastExtPL) and not na(prevExtPL) and math.abs(lastExtPL - prevExtPL) <= eqTol
+externalLiquidityAbove = externalEQH ? math.max(lastExtPH, prevExtPH) : externalHigh
+externalLiquidityBelow = externalEQL ? math.min(lastExtPL, prevExtPL) : externalLow
+
+// 3) INTERNAL LIQUIDITY / INDUCEMENT
+internalHigh = ta.highest(high[1], 8)
+internalLow = ta.lowest(low[1], 8)
+internalSweepUp = high > internalHigh and close < internalHigh
+internalSweepDown = low < internalLow and close > internalLow
+intPivotHigh = ta.pivothigh(high, 2, 2)
+intPivotLow = ta.pivotlow(low, 2, 2)
+lastIntPH = ta.valuewhen(not na(intPivotHigh), intPivotHigh, 0)
+prevIntPH = ta.valuewhen(not na(intPivotHigh), intPivotHigh, 1)
+lastIntPL = ta.valuewhen(not na(intPivotLow), intPivotLow, 0)
+prevIntPL = ta.valuewhen(not na(intPivotLow), intPivotLow, 1)
+internalEQH = not na(lastIntPH) and not na(prevIntPH) and math.abs(lastIntPH - prevIntPH) <= atr * 0.10
+internalEQL = not na(lastIntPL) and not na(prevIntPL) and math.abs(lastIntPL - prevIntPL) <= atr * 0.10
+inducementBuy = internalSweepDown and not externalSweepLow and close > open
+inducementSell = internalSweepUp and not externalSweepHigh and close < open
+
+// 4) FVG / IMBALANCE
+bullFvgNow = low > high[2] and (low - high[2]) >= atr * 0.08
+bearFvgNow = high < low[2] and (low[2] - high) >= atr * 0.08
+var float bullFvgLow = na
+var float bullFvgHigh = na
+var float bearFvgLow = na
+var float bearFvgHigh = na
+if bullFvgNow
+    bullFvgLow := high[2]
+    bullFvgHigh := low
+if bearFvgNow
+    bearFvgLow := high
+    bearFvgHigh := low[2]
+bullFvgActive = not na(bullFvgLow) and low <= bullFvgHigh and high >= bullFvgLow
+bearFvgActive = not na(bearFvgLow) and high >= bearFvgLow and low <= bearFvgHigh
+
+// 5) ORDER BLOCK VÁLIDO POR DESPLAZAMIENTO
+bullDisplacement = close > open and body >= atr * 0.65 and close > high[1]
+bearDisplacement = close < open and body >= atr * 0.65 and close < low[1]
+bullObLow = ta.valuewhen(bullDisplacement and close[1] < open[1], low[1], 0)
+bullObHigh = ta.valuewhen(bullDisplacement and close[1] < open[1], high[1], 0)
+bearObLow = ta.valuewhen(bearDisplacement and close[1] > open[1], low[1], 0)
+bearObHigh = ta.valuewhen(bearDisplacement and close[1] > open[1], high[1], 0)
+bullObTouch = not na(bullObLow) and not na(bullObHigh) and low <= bullObHigh and high >= bullObLow
+bearObTouch = not na(bearObLow) and not na(bearObHigh) and high >= bearObLow and low <= bearObHigh
+
+// 6) BREAKER / RETEST + CONFLUENCIA POI
+bullBreaker = not na(bearObHigh) and close > bearObHigh and low <= bearObHigh + atr * 0.20
+bearBreaker = not na(bullObLow) and close < bullObLow and high >= bullObLow - atr * 0.20
+poiBuyConfluence = (bullObTouch or bullFvgActive or bullBreaker) and (h3Discount or h4Discount or macroDiscount)
+poiSellConfluence = (bearObTouch or bearFvgActive or bearBreaker) and (h3Premium or h4Premium or macroPremium)
+
+// 7) UBICACIÓN SEPARADA DE FUERZA
+locationBuyRaw = (h3Discount ? 24.0 : 0.0) + (h4Discount ? 22.0 : 0.0) + (externalSweepLow or macroSweepDown ? 22.0 : 0.0) + (poiBuyConfluence ? 22.0 : 0.0) + (internalSweepDown or inducementBuy ? 10.0 : 0.0)
+locationSellRaw = (h3Premium ? 24.0 : 0.0) + (h4Premium ? 22.0 : 0.0) + (externalSweepHigh or macroSweepUp ? 22.0 : 0.0) + (poiSellConfluence ? 22.0 : 0.0) + (internalSweepUp or inducementSell ? 10.0 : 0.0)
+locationBuyQuality = math.min(100.0, locationBuyRaw)
+locationSellQuality = math.min(100.0, locationSellRaw)
+
+institutionalBuyBoost = institutionalBiasBuy ? 8.0 : motherBias == -1 ? -12.0 : 0.0
+institutionalSellBoost = institutionalBiasSell ? 8.0 : motherBias == 1 ? -12.0 : 0.0
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// IMPULXOR V50 — PREVIOUS DAY & FRACTAL CONTEXT ENGINE
+// D1 previo -> H4/H3 -> H1 -> M15 -> M5.
+// Formaliza PDH/PDL/EQ 50%, raids, 0.618/0.69/0.786/0.85 y jerarquía fractal.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+float pdh = prevDayHigh
+float pdl = prevDayLow
+float pdRange = math.max(pdh - pdl, syminfo.mintick)
+float pdEq = pdl + pdRange * 0.50
+
+float pd618 = pdl + pdRange * 0.618
+float pd690 = pdl + pdRange * 0.690
+float pd786 = pdl + pdRange * 0.786
+float pd850 = pdl + pdRange * 0.850
+
+float pdBuy618 = pdh - pdRange * 0.618
+float pdBuy690 = pdh - pdRange * 0.690
+float pdBuy786 = pdh - pdRange * 0.786
+float pdBuy850 = pdh - pdRange * 0.850
+
+bool pdPremium = close > pdEq
+bool pdDiscount = close < pdEq
+bool pdAboveHigh = close > pdh
+bool pdBelowLow = close < pdl
+
+float pdRaidTol = atr * prevDayRaidAtr
+bool pdhRaid = high > pdh + pdRaidTol and close < pdh
+bool pdlRaid = low < pdl - pdRaidTol and close > pdl
+bool pdhReclaim = low < pdh and close > pdh
+bool pdlReclaim = high > pdl and close < pdl
+
+float pdSellOteLow = math.min(pd690, pd850)
+float pdSellOteHigh = math.max(pd690, pd850)
+float pdBuyOteLow = math.min(pdBuy850, pdBuy690)
+float pdBuyOteHigh = math.max(pdBuy850, pdBuy690)
+bool inPrevDaySellOTE = high >= pdSellOteLow and low <= pdSellOteHigh
+bool inPrevDayBuyOTE = high >= pdBuyOteLow and low <= pdBuyOteHigh
+
+int fractalBuyAlign = (dD == 1 ? 1 : 0) + ((d240 == 1 or d180 == 1) ? 1 : 0) + (d60 == 1 ? 1 : 0) + (d15 == 1 ? 1 : 0) + (d5 == 1 ? 1 : 0)
+int fractalSellAlign = (dD == -1 ? 1 : 0) + ((d240 == -1 or d180 == -1) ? 1 : 0) + (d60 == -1 ? 1 : 0) + (d15 == -1 ? 1 : 0) + (d5 == -1 ? 1 : 0)
+
+bool fractalBuyAligned = fractalBuyAlign >= fractalMinAlign
+bool fractalSellAligned = fractalSellAlign >= fractalMinAlign
+bool fractalMacroBuy = (dD == 1 or d240 == 1 or d180 == 1) and pdDiscount
+bool fractalMacroSell = (dD == -1 or d240 == -1 or d180 == -1) and pdPremium
+bool fractalSetupBuy = fractalMacroBuy and (d60 == 1 or d15 == 1) and (pdlRaid or inPrevDayBuyOTE or pdDiscount)
+bool fractalSetupSell = fractalMacroSell and (d60 == -1 or d15 == -1) and (pdhRaid or inPrevDaySellOTE or pdPremium)
+bool fractalTriggerBuy = fractalSetupBuy and d5 == 1 and (microBosBuy or absorbBuy or seqAbsorbBuy or buyPullbackDying)
+bool fractalTriggerSell = fractalSetupSell and d5 == -1 and (microBosSell or absorbSell or seqAbsorbSell or sellPullbackDying)
+
+float fractalBuyQuality = math.min(100.0, fractalBuyAlign * 14.0 + (pdDiscount ? 10.0 : 0.0) + (pdlRaid ? 12.0 : 0.0) + (inPrevDayBuyOTE ? 8.0 : 0.0))
+float fractalSellQuality = math.min(100.0, fractalSellAlign * 14.0 + (pdPremium ? 10.0 : 0.0) + (pdhRaid ? 12.0 : 0.0) + (inPrevDaySellOTE ? 8.0 : 0.0))
+
+string prevDayPosTxt = pdAboveHigh ? "SOBRE PDH" : pdBelowLow ? "BAJO PDL" : pdPremium ? "PREMIUM > 50%" : pdDiscount ? "DISCOUNT < 50%" : "EQ 50%"
+string prevDayRaidTxt = pdlRaid ? "PDL RAID ✓" : pdhRaid ? "PDH RAID ✓" : pdhReclaim ? "PDH RECLAIM" : pdlReclaim ? "PDL RECLAIM" : "SIN RAID"
+string fractalBiasTxt = fractalBuyAligned and not fractalSellAligned ? "BUY" : fractalSellAligned and not fractalBuyAligned ? "SELL" : fractalMacroBuy ? "BUY PREPARANDO" : fractalMacroSell ? "SELL PREPARANDO" : "MIXTO"
+string fractalD1Txt = dD == 1 ? "BUY" : dD == -1 ? "SELL" : "NEUTRO"
+string fractalH4Txt = d240 == 1 ? "BUY" : d240 == -1 ? "SELL" : "NEUTRO"
+string fractalH3Txt = d180 == 1 ? "BUY" : d180 == -1 ? "SELL" : "NEUTRO"
+string fractalH1Txt = d60 == 1 ? "BUY" : d60 == -1 ? "SELL" : "NEUTRO"
+string fractalM15Txt = d15 == 1 ? "BUY" : d15 == -1 ? "SELL" : "NEUTRO"
+string fractalM5Txt = d5 == 1 ? "BUY" : d5 == -1 ? "SELL" : "NEUTRO"
+string fractalFlowTxt = "D1 " + fractalD1Txt + " | H4 " + fractalH4Txt + " | H3 " + fractalH3Txt + " | H1 " + fractalH1Txt + " | M15 " + fractalM15Txt + " | M5 " + fractalM5Txt
+string prevDayOteTxt = inPrevDayBuyOTE ? "BUY OTE PD ✓" : inPrevDaySellOTE ? "SELL OTE PD ✓" : "FUERA OTE PD"
+string fractalActionTxt = fractalTriggerBuy ? "FRACTAL BUY CONFIRMADO" : fractalTriggerSell ? "FRACTAL SELL CONFIRMADO" : fractalSetupBuy ? "ESPERAR TRIGGER M5 BUY" : fractalSetupSell ? "ESPERAR TRIGGER M5 SELL" : "ESPERAR RANGO + ALINEACIÓN"
+
+float fractalBuyBoost = fractalBuyAligned ? 6.0 : fractalMacroBuy ? 3.0 : fractalSellAligned ? -7.0 : 0.0
+float fractalSellBoost = fractalSellAligned ? 6.0 : fractalMacroSell ? 3.0 : fractalBuyAligned ? -7.0 : 0.0
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// IMPULXOR V50 — ICT FORMAL CORE / PINE-SAFE
+// BSL/SSL + MSS/CHoCH + displacement + dealing ranges + OTE
+// + PD Arrays + liquidity raids + Killzones.
+// ADITIVO: no reemplaza Price Action, Flow, H3/H4, POI ni protecciones.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// A) BSL / SSL FORMAL
+float ictBSL = externalEQH and not na(lastExtPH) ? math.max(lastExtPH, prevExtPH) : externalLiquidityAbove
+float ictSSL = externalEQL and not na(lastExtPL) ? math.min(lastExtPL, prevExtPL) : externalLiquidityBelow
+bool ictBslRaid = not na(ictBSL) and high > ictBSL and close < ictBSL
+bool ictSslRaid = not na(ictSSL) and low < ictSSL and close > ictSSL
+bool ictBslPending = not na(ictBSL) and high < ictBSL
+bool ictSslPending = not na(ictSSL) and low > ictSSL
+
+// B) DEALING RANGES ANIDADOS
+float ictExtHigh = math.max(h3High, macroHighH4)
+float ictExtLow = math.min(h3Low, macroLowH4)
+float ictExtRange = math.max(ictExtHigh - ictExtLow, syminfo.mintick)
+float ictExtEq = ictExtLow + ictExtRange * 0.50
+bool ictExtPremium = close > ictExtEq
+bool ictExtDiscount = close < ictExtEq
+
+float ictIntHigh = ta.highest(high[1], ictDealingLen)
+float ictIntLow = ta.lowest(low[1], ictDealingLen)
+float ictIntRange = math.max(ictIntHigh - ictIntLow, syminfo.mintick)
+float ictIntEq = ictIntLow + ictIntRange * 0.50
+bool ictIntPremium = close > ictIntEq
+bool ictIntDiscount = close < ictIntEq
+
+// C) OTE
+float ictBuyOteLow = ictIntHigh - ictIntRange * ictOteMax
+float ictBuyOteHigh = ictIntHigh - ictIntRange * ictOteMin
+float ictSellOteLow = ictIntLow + ictIntRange * ictOteMin
+float ictSellOteHigh = ictIntLow + ictIntRange * ictOteMax
+bool ictInBuyOTE = low <= ictBuyOteHigh and high >= ictBuyOteLow
+bool ictInSellOTE = high >= ictSellOteLow and low <= ictSellOteHigh
+
+// D) DISPLACEMENT FORMAL
+bool ictBullDisplacement = close > open and body >= atr * ictDispAtr and close > high[1] and closeNearHigh
+bool ictBearDisplacement = close < open and body >= atr * ictDispAtr and close < low[1] and closeNearLow
+
+// E) MSS / CHoCH FORMAL
+float ictSwingHigh = ta.highest(high[1], ictMssLookback)
+float ictSwingLow = ta.lowest(low[1], ictMssLookback)
+bool ictBullMSS = close > ictSwingHigh and ictBullDisplacement and (internalSweepDown or ictSslRaid or sweepDown)
+bool ictBearMSS = close < ictSwingLow and ictBearDisplacement and (internalSweepUp or ictBslRaid or sweepUp)
+
+// CHoCH usa contexto H3/H4 ya declarado. No usa masterDir antes de su declaración.
+bool ictBullChoch = close > ictSwingHigh and (motherBias == -1 or d180 == -1 or d240 == -1)
+bool ictBearChoch = close < ictSwingLow and (motherBias == 1 or d180 == 1 or d240 == 1)
+
+// F) PD ARRAY HIERARCHY
+bool ictBullPdOB = bullObTouch and ictIntDiscount
+bool ictBearPdOB = bearObTouch and ictIntPremium
+bool ictBullPdFVG = bullFvgActive and ictIntDiscount
+bool ictBearPdFVG = bearFvgActive and ictIntPremium
+bool ictBullPdBreaker = bullBreaker and ictIntDiscount
+bool ictBearPdBreaker = bearBreaker and ictIntPremium
+bool ictBullPdOTE = ictInBuyOTE and ictIntDiscount
+bool ictBearPdOTE = ictInSellOTE and ictIntPremium
+
+int ictBullPdCount = (ictBullPdOB ? 1 : 0) + (ictBullPdFVG ? 1 : 0) + (ictBullPdBreaker ? 1 : 0) + (ictBullPdOTE ? 1 : 0)
+int ictBearPdCount = (ictBearPdOB ? 1 : 0) + (ictBearPdFVG ? 1 : 0) + (ictBearPdBreaker ? 1 : 0) + (ictBearPdOTE ? 1 : 0)
+
+// G) KILLZONES / TIME QUALITY
+bool ictInLondon = not na(time(timeframe = timeframe.period, session = ictLondon, timezone = ictTz))
+bool ictInNewYork = not na(time(timeframe = timeframe.period, session = ictNewYork, timezone = ictTz))
+bool ictInLondonClose = not na(time(timeframe = timeframe.period, session = ictLondonClose, timezone = ictTz))
+bool ictInKillzone = ictInLondon or ictInNewYork or ictInLondonClose
+float ictSessionQuality = not ictUseKillzone ? 100.0 : ictInKillzone ? 100.0 : 58.0
+string ictSessionTxt = ictInLondon ? "LONDON KZ" : ictInNewYork ? "NEW YORK KZ" : ictInLondonClose ? "LONDON CLOSE" : "FUERA KZ"
+
+// H) LIQUIDITY RAID + REPRICING
+bool ictBullRaidSequence = (ictSslRaid or externalSweepLow or internalSweepDown) and (ictBullMSS or ictBullChoch) and ictBullDisplacement
+bool ictBearRaidSequence = (ictBslRaid or externalSweepHigh or internalSweepUp) and (ictBearMSS or ictBearChoch) and ictBearDisplacement
+
+// I) CALIDAD ICT INDEPENDIENTE
+float ictBuyQualityRaw = (
+    (ictExtDiscount ? 16.0 : 0.0) +
+    (ictIntDiscount ? 12.0 : 0.0) +
+    (ictSslRaid ? 18.0 : 0.0) +
+    (ictBullMSS ? 18.0 : ictBullChoch ? 10.0 : 0.0) +
+    (ictBullDisplacement ? 12.0 : 0.0) +
+    (ictBullPdCount >= 2 ? 16.0 : ictBullPdCount == 1 ? 8.0 : 0.0) +
+    (ictInBuyOTE ? 8.0 : 0.0)
+)
+
+float ictSellQualityRaw = (
+    (ictExtPremium ? 16.0 : 0.0) +
+    (ictIntPremium ? 12.0 : 0.0) +
+    (ictBslRaid ? 18.0 : 0.0) +
+    (ictBearMSS ? 18.0 : ictBearChoch ? 10.0 : 0.0) +
+    (ictBearDisplacement ? 12.0 : 0.0) +
+    (ictBearPdCount >= 2 ? 16.0 : ictBearPdCount == 1 ? 8.0 : 0.0) +
+    (ictInSellOTE ? 8.0 : 0.0)
+)
+
+float ictBuyQuality = math.min(100.0, ictBuyQualityRaw * ictSessionQuality / 100.0)
+float ictSellQuality = math.min(100.0, ictSellQualityRaw * ictSessionQuality / 100.0)
+
+// J) BIAS ICT
+bool ictBiasBuy = (motherBias == 1 or d180 == 1 or d240 == 1) and ictExtDiscount and not macroNoBuyTop
+bool ictBiasSell = (motherBias == -1 or d180 == -1 or d240 == -1) and ictExtPremium and not macroNoSellBottom
+int ictBias = ictBiasBuy and not ictBiasSell ? 1 : ictBiasSell and not ictBiasBuy ? -1 : 0
+
+string ictPdTxtBuy = ictBullPdCount >= 2 ? "PD ARRAY x" + str.tostring(ictBullPdCount) + " ✓" : ictBullPdCount == 1 ? "PD ARRAY x1" : "SIN PD ARRAY"
+string ictPdTxtSell = ictBearPdCount >= 2 ? "PD ARRAY x" + str.tostring(ictBearPdCount) + " ✓" : ictBearPdCount == 1 ? "PD ARRAY x1" : "SIN PD ARRAY"
+string ictStructureTxt = ictBullMSS ? "MSS BUY ✓" : ictBearMSS ? "MSS SELL ✓" : ictBullChoch ? "CHoCH BUY" : ictBearChoch ? "CHoCH SELL" : "ESTRUCTURA PENDIENTE"
+string ictLiquidityTxt = ictSslRaid ? "SSL RAID ✓" : ictBslRaid ? "BSL RAID ✓" : ictSslPending and ictBiasBuy ? "SSL PENDIENTE" : ictBslPending and ictBiasSell ? "BSL PENDIENTE" : "LIQ MAP ACTIVO"
+string ictOteTxt = ictInBuyOTE ? "BUY OTE ✓" : ictInSellOTE ? "SELL OTE ✓" : "FUERA OTE"
+
+// K) SETUP / GATILLO ICT
+bool ictBuySetupReady = ictBiasBuy and ictBuyQuality >= 55 and (ictSslRaid or internalSweepDown or externalSweepLow) and ictBullPdCount >= 1
+bool ictSellSetupReady = ictBiasSell and ictSellQuality >= 55 and (ictBslRaid or internalSweepUp or externalSweepHigh) and ictBearPdCount >= 1
+
+// buyNoFomo / sellNoFomo ya están declarados mucho antes de este bloque.
+bool ictBuyTrigger = ictBuySetupReady and (ictBullMSS or ictBullChoch) and ictBullDisplacement and buyNoFomo
+bool ictSellTrigger = ictSellSetupReady and (ictBearMSS or ictBearChoch) and ictBearDisplacement and sellNoFomo
+
+string ictActionTxt = ictBuyTrigger ? "ICT BUY CONFIRMADO" : ictSellTrigger ? "ICT SELL CONFIRMADO" : ictBuySetupReady ? "ESPERAR MSS/DISPLACEMENT BUY" : ictSellSetupReady ? "ESPERAR MSS/DISPLACEMENT SELL" : "ESPERAR LIQUIDEZ + PD ARRAY"
+
+// L) INVALIDACIÓN ICT
+float ictBuyInvalidationBase = math.min(ictIntLow, nz(bullObLow, ictIntLow))
+float ictSellInvalidationBase = math.max(ictIntHigh, nz(bearObHigh, ictIntHigh))
+float ictBuyInvalidation = not na(ictSSL) ? math.min(ictSSL, ictBuyInvalidationBase) - atr * 0.10 : ictBuyInvalidationBase - atr * 0.10
+float ictSellInvalidation = not na(ictBSL) ? math.max(ictBSL, ictSellInvalidationBase) + atr * 0.10 : ictSellInvalidationBase + atr * 0.10
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V50.2 — IMPULSE FIB + POI QUALITY (LIGERO)
+// Anclado al último cambio estructural/impulso confirmado.
+// No dibuja líneas adicionales: solo mejora ubicación y decisión.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var float imxFibBuyLow = na
+var float imxFibBuyHigh = na
+var float imxFibSellHigh = na
+var float imxFibSellLow = na
+
+if ictBullMSS or ictBullChoch or macroBreakBuy
+    imxFibBuyLow := nz(ictSwingLow, low)
+    imxFibBuyHigh := high
+if ictBearMSS or ictBearChoch or macroBreakSell
+    imxFibSellHigh := nz(ictSwingHigh, high)
+    imxFibSellLow := low
+
+if (ictBiasBuy or motherBias == 1) and not na(imxFibBuyHigh)
+    imxFibBuyHigh := math.max(imxFibBuyHigh, high)
+if (ictBiasSell or motherBias == -1) and not na(imxFibSellLow)
+    imxFibSellLow := math.min(imxFibSellLow, low)
+
+imxFibBuyRangeOk = not na(imxFibBuyLow) and not na(imxFibBuyHigh) and imxFibBuyHigh > imxFibBuyLow
+imxFibSellRangeOk = not na(imxFibSellHigh) and not na(imxFibSellLow) and imxFibSellHigh > imxFibSellLow
+
+imxBuyFib382 = imxFibBuyRangeOk ? imxFibBuyHigh - (imxFibBuyHigh - imxFibBuyLow) * 0.382 : na
+imxBuyFib500 = imxFibBuyRangeOk ? imxFibBuyHigh - (imxFibBuyHigh - imxFibBuyLow) * 0.500 : na
+imxBuyFib618 = imxFibBuyRangeOk ? imxFibBuyHigh - (imxFibBuyHigh - imxFibBuyLow) * 0.618 : na
+imxBuyFib705 = imxFibBuyRangeOk ? imxFibBuyHigh - (imxFibBuyHigh - imxFibBuyLow) * 0.705 : na
+imxBuyFib786 = imxFibBuyRangeOk ? imxFibBuyHigh - (imxFibBuyHigh - imxFibBuyLow) * 0.786 : na
+
+imxSellFib382 = imxFibSellRangeOk ? imxFibSellLow + (imxFibSellHigh - imxFibSellLow) * 0.382 : na
+imxSellFib500 = imxFibSellRangeOk ? imxFibSellLow + (imxFibSellHigh - imxFibSellLow) * 0.500 : na
+imxSellFib618 = imxFibSellRangeOk ? imxFibSellLow + (imxFibSellHigh - imxFibSellLow) * 0.618 : na
+imxSellFib705 = imxFibSellRangeOk ? imxFibSellLow + (imxFibSellHigh - imxFibSellLow) * 0.705 : na
+imxSellFib786 = imxFibSellRangeOk ? imxFibSellLow + (imxFibSellHigh - imxFibSellLow) * 0.786 : na
+
+imxFibTol = atr * 0.12
+f_imx_near(_v) =>
+    not na(_v) and low <= _v + imxFibTol and high >= _v - imxFibTol
+
+imxFibBuyHit = f_imx_near(imxBuyFib382) or f_imx_near(imxBuyFib500) or f_imx_near(imxBuyFib618) or f_imx_near(imxBuyFib705) or f_imx_near(imxBuyFib786)
+imxFibSellHit = f_imx_near(imxSellFib382) or f_imx_near(imxSellFib500) or f_imx_near(imxSellFib618) or f_imx_near(imxSellFib705) or f_imx_near(imxSellFib786)
+
+imxPoiBuyCount = (bullFvgActive ? 1 : 0) + (bullObTouch ? 1 : 0) + (bullBreaker ? 1 : 0) + ((ictInBuyOTE or inPrevDayBuyOTE) ? 1 : 0) + (imxFibBuyHit ? 1 : 0)
+imxPoiSellCount = (bearFvgActive ? 1 : 0) + (bearObTouch ? 1 : 0) + (bearBreaker ? 1 : 0) + ((ictInSellOTE or inPrevDaySellOTE) ? 1 : 0) + (imxFibSellHit ? 1 : 0)
+
+imxPoiBuyQuality = imxPoiBuyCount / 5.0 * 100.0
+imxPoiSellQuality = imxPoiSellCount / 5.0 * 100.0
+imxPoiTxtBuy = "POI " + str.tostring(imxPoiBuyCount) + "/5"
+imxPoiTxtSell = "POI " + str.tostring(imxPoiSellCount) + "/5"
+
+//━━━━━━━━━━━━━━━━━━
+// SCORE V50.2 — NORMALIZADO POR FAMILIAS
+// Conserva todas las lecturas; evita premiar varias veces el mismo fenómeno.
+//━━━━━━━━━━━━━━━━━━
+float buyFamLocation = math.min(18.0,
+     (inBuyZone ? 5.0 : 0.0) +
+     (poiBuyConfluence ? 5.0 : 0.0) +
+     (imxPoiBuyCount >= 4 ? 8.0 : imxPoiBuyCount == 3 ? 6.0 : imxPoiBuyCount == 2 ? 3.0 : 0.0))
+
+float buyFamLiquidity = math.min(14.0,
+     ((sweepDown or internalSweepDown or externalSweepLow or macroSweepDown or ictSslRaid) ? 10.0 : 0.0) +
+     (inducementBuy ? 4.0 : 0.0))
+
+float buyFamReaction = math.min(14.0,
+     (absorbBuy ? 8.0 : 0.0) +
+     (seqAbsorbBuy ? 4.0 : 0.0) +
+     (pocDefendedBuy ? 4.0 : 0.0))
+
+float buyFamFlow = math.min(10.0,
+     (buyPressure ? 6.0 : 0.0) +
+     (deltaAccelerationBuy ? 4.0 : 0.0))
+
+float buyFamStructure = math.min(16.0,
+     ((microBosBuy or ictBullMSS or ictBullChoch) ? 9.0 : 0.0) +
+     (buyContinuation ? 4.0 : 0.0) +
+     ((ictBullDisplacement or bullDisplacement) ? 3.0 : 0.0))
+
+float buyFamMacro = math.min(16.0,
+     (institutionalBiasBuy ? 5.0 : 0.0) +
+     (macroBiasBuy >= 45 ? 4.0 : macroBiasBuy >= 25 ? 2.0 : 0.0) +
+     (fractalBuyAligned ? 4.0 : fractalMacroBuy ? 2.0 : 0.0) +
+     (mtfBuy > mtfSell + 12 ? 3.0 : mtfBuy > mtfSell ? 1.5 : 0.0))
+
+float buyFamTrigger = math.min(14.0,
+     (ictBuyTrigger ? 6.0 : 0.0) +
+     (fractalTriggerBuy ? 4.0 : 0.0) +
+     (smartBuyAllowed or macroEntryBuy ? 4.0 : 0.0))
+
+float buyFamRisk = buyNoFomo ? 8.0 : 0.0
+float buyPenalty = (macroNoBuyTop ? 14.0 : 0.0) + ((lateBuyExhaustion or antiTopBuy) ? 16.0 : 0.0) + (motherBias == -1 ? 8.0 : 0.0)
+
+float buyScore = math.max(0.0, math.min(100.0,
+     buyFamLocation + buyFamLiquidity + buyFamReaction + buyFamFlow +
+     buyFamStructure + buyFamMacro + buyFamTrigger + buyFamRisk - buyPenalty))
+
+float sellFamLocation = math.min(18.0,
+     (inSellZone ? 5.0 : 0.0) +
+     (poiSellConfluence ? 5.0 : 0.0) +
+     (imxPoiSellCount >= 4 ? 8.0 : imxPoiSellCount == 3 ? 6.0 : imxPoiSellCount == 2 ? 3.0 : 0.0))
+
+float sellFamLiquidity = math.min(14.0,
+     ((sweepUp or internalSweepUp or externalSweepHigh or macroSweepUp or ictBslRaid) ? 10.0 : 0.0) +
+     (inducementSell ? 4.0 : 0.0))
+
+float sellFamReaction = math.min(14.0,
+     (absorbSell ? 8.0 : 0.0) +
+     (seqAbsorbSell ? 4.0 : 0.0) +
+     (pocDefendedSell ? 4.0 : 0.0))
+
+float sellFamFlow = math.min(10.0,
+     (sellPressure ? 6.0 : 0.0) +
+     (deltaAccelerationSell ? 4.0 : 0.0))
+
+float sellFamStructure = math.min(16.0,
+     ((microBosSell or ictBearMSS or ictBearChoch) ? 9.0 : 0.0) +
+     (sellContinuation ? 4.0 : 0.0) +
+     ((ictBearDisplacement or bearDisplacement) ? 3.0 : 0.0))
+
+float sellFamMacro = math.min(16.0,
+     (institutionalBiasSell ? 5.0 : 0.0) +
+     (macroBiasSell >= 45 ? 4.0 : macroBiasSell >= 25 ? 2.0 : 0.0) +
+     (fractalSellAligned ? 4.0 : fractalMacroSell ? 2.0 : 0.0) +
+     (mtfSell > mtfBuy + 12 ? 3.0 : mtfSell > mtfBuy ? 1.5 : 0.0))
+
+float sellFamTrigger = math.min(14.0,
+     (ictSellTrigger ? 6.0 : 0.0) +
+     (fractalTriggerSell ? 4.0 : 0.0) +
+     (smartSellAllowed or macroEntrySell ? 4.0 : 0.0))
+
+float sellFamRisk = sellNoFomo ? 8.0 : 0.0
+float sellPenalty = (macroNoSellBottom ? 14.0 : 0.0) + ((lateSellExhaustion or antiBottomSell) ? 16.0 : 0.0) + (motherBias == 1 ? 8.0 : 0.0)
+
+float sellScore = math.max(0.0, math.min(100.0,
+     sellFamLocation + sellFamLiquidity + sellFamReaction + sellFamFlow +
+     sellFamStructure + sellFamMacro + sellFamTrigger + sellFamRisk - sellPenalty))
+
+
+//━━━━━━━━━━━━━━━━━━
+// ANTICIPACIÓN REAL DE IMPULSO
+// Agregado aparte: no cambia la caja original ni la lógica principal.
+//━━━━━━━━━━━━━━━━━━
+preBuyScore = 0.0
+preBuyScore += compression ? 18.0 : 0.0
+preBuyScore += sweepDown ? 20.0 : 0.0
+preBuyScore += absorbBuy ? 20.0 : 0.0
+preBuyScore += seqAbsorbBuy ? 12.0 : 0.0
+preBuyScore += pocDefendedBuy ? 12.0 : 0.0
+preBuyScore += buyPressure ? 10.0 : 0.0
+preBuyScore += deltaAccelerationBuy ? 8.0 : 0.0
+preBuyScore += adxWake ? 8.0 : 0.0
+preBuyScore += smartBuyAllowed ? 14.0 : 0.0
+preBuyScore += macroEntryBuy ? 12.0 : 0.0
+preBuyScore += mtfBuy * 0.16
+preBuyScore := math.max(0.0, math.min(100.0, preBuyScore))
+
+preSellScore = 0.0
+preSellScore += compression ? 18.0 : 0.0
+preSellScore += sweepUp ? 20.0 : 0.0
+preSellScore += absorbSell ? 20.0 : 0.0
+preSellScore += seqAbsorbSell ? 12.0 : 0.0
+preSellScore += pocDefendedSell ? 12.0 : 0.0
+preSellScore += sellPressure ? 10.0 : 0.0
+preSellScore += deltaAccelerationSell ? 8.0 : 0.0
+preSellScore += adxWake ? 8.0 : 0.0
+preSellScore += smartSellAllowed ? 14.0 : 0.0
+preSellScore += macroEntrySell ? 12.0 : 0.0
+preSellScore += mtfSell * 0.16
+preSellScore := math.max(0.0, math.min(100.0, preSellScore))
+
+preBuyLoad = (compression or sweepDown or absorbBuy or seqAbsorbBuy or pocDefendedBuy or smartBuyAllowed or macroEntryBuy) and (buyPressure or deltaAccelerationBuy or adxWake) and (d5 == 1 or d15 == 1 or mtfBuy >= mtfSell)
+preSellLoad = (compression or sweepUp or absorbSell or seqAbsorbSell or pocDefendedSell or smartSellAllowed or macroEntrySell) and (sellPressure or deltaAccelerationSell or adxWake) and (d5 == -1 or d15 == -1 or mtfSell >= mtfBuy)
+
+preBuyArming = preBuyLoad and preBuyScore >= 58 and not buyImpulse
+preSellArming = preSellLoad and preSellScore >= 58 and not sellImpulse
+preDirection = preBuyScore > preSellScore + 8 ? 1 : preSellScore > preBuyScore + 8 ? -1 : 0
+preImpulseNow = preDirection == 1 ? preBuyArming : preDirection == -1 ? preSellArming : false
+preScoreShown = preDirection == 1 ? preBuyScore : preDirection == -1 ? preSellScore : math.max(preBuyScore, preSellScore)
+preReasonTxt = preDirection == 1 and smartBuyAllowed ? "NACIMIENTO BUY" : preDirection == -1 and smartSellAllowed ? "NACIMIENTO SELL" : compression ? "COMPRESIÓN" : preDirection == 1 and sweepDown ? "BARRIDA ABAJO" : preDirection == -1 and sweepUp ? "BARRIDA ARRIBA" : preDirection == 1 and absorbBuy ? "ABSORCIÓN BUY" : preDirection == -1 and absorbSell ? "ABSORCIÓN SELL" : preDirection == 1 and buyPressure ? "FLOW BUY" : preDirection == -1 and sellPressure ? "FLOW SELL" : adxWake ? "ADX DESPERTANDO" : "CARGA VIVA"
+
+imxMotherBuyVotes = (dD == 1 ? 3 : 0) + (d240 == 1 ? 3 : 0) + (d180 == 1 ? 2 : 0) + (d60 == 1 ? 1 : 0)
+imxMotherSellVotes = (dD == -1 ? 3 : 0) + (d240 == -1 ? 3 : 0) + (d180 == -1 ? 2 : 0) + (d60 == -1 ? 1 : 0)
+imxStructuralMotherDir = imxMotherBuyVotes >= 5 and imxMotherBuyVotes > imxMotherSellVotes ? 1 : imxMotherSellVotes >= 5 and imxMotherSellVotes > imxMotherBuyVotes ? -1 : 0
+rawDir = imxStructuralMotherDir != 0 ? imxStructuralMotherDir : buyScore > sellScore + masterGap ? 1 : sellScore > buyScore + masterGap ? -1 : 0
+
+//━━━━━━━━━━━━━━━━━━
+// HOLD ESTABLE
+//━━━━━━━━━━━━━━━━━━
+var int masterDir = 0
+var int prevMasterDirNotice = 0
+var string persistentTitle = "ESPERAR"
+var string persistentLine1 = "SIN AVISO"
+var string persistentLine2 = "-"
+var string persistentLine3 = "-"
+var string persistentLine4 = "-"
+var color persistentBg = color.new(color.rgb(35,35,35), 0)
+var color persistentTxt = color.white
+var int persistentBars = 0
+var int holdBar = na
+var int revBuy = 0
+var int revSell = 0
+
+barsInDir = na(holdBar) ? 999 : bar_index - holdBar
+
+candidateBuy = rawDir == 1 and buyScore >= minEntrySoft and (buyContinuation or absorbBuy or seqAbsorbBuy or pocDefendedBuy or buyImpulse or smartBuyAllowed or macroEntryBuy)
+candidateSell = rawDir == -1 and sellScore >= minEntrySoft and (sellContinuation or absorbSell or seqAbsorbSell or pocDefendedSell or sellImpulse or smartSellAllowed or macroEntrySell)
+
+//━━━━━━━━━━━━━━━━━━
+// INVALIDADOR RÁPIDO ANTI-HOLD PEGADO
+// No toca visual. Solo evita que el HOLD viejo siga en contra de un impulso vivo.
+//━━━━━━━━━━━━━━━━━━
+fastBuyOverride = mtfBuy > mtfSell and close > ema21 and ema9 >= ema21 and (buyPressure or deltaAccelerationBuy) and (microBosBuy or buyImpulse or velocityWakeBuy or rangeExpansion or smartBuyAllowed or macroEntryBuy) and not trapSell
+fastSellOverride = mtfSell > mtfBuy and close < ema21 and ema9 <= ema21 and (sellPressure or deltaAccelerationSell) and (microBosSell or sellImpulse or velocityWakeSell or rangeExpansion or smartSellAllowed or macroEntrySell) and not trapBuy
+
+if masterDir == 0
+    if candidateBuy or fastBuyOverride
+        masterDir := 1
+        holdBar := bar_index
+    else if candidateSell or fastSellOverride
+        masterDir := -1
+        holdBar := bar_index
+else if masterDir == 1
+    revSell := fastSellOverride ? confirmReverseBars : candidateSell ? revSell + 1 : 0
+    revBuy := 0
+    if (barsInDir >= holdBarsMin or fastSellOverride) and revSell >= confirmReverseBars and (sellScore > buyScore + masterGap or fastSellOverride)
+        masterDir := -1
+        holdBar := bar_index
+        revSell := 0
+else if masterDir == -1
+    revBuy := fastBuyOverride ? confirmReverseBars : candidateBuy ? revBuy + 1 : 0
+    revSell := 0
+    if (barsInDir >= holdBarsMin or fastBuyOverride) and revBuy >= confirmReverseBars and (buyScore > sellScore + masterGap or fastBuyOverride)
+        masterDir := 1
+        holdBar := bar_index
+        revBuy := 0
+
+if masterDir == 1 and close < buyZoneFrom - atr * 0.65 and sellScore > buyScore + masterGap
+    masterDir := 0
+    holdBar := na
+
+if masterDir == -1 and close > sellZoneTo + atr * 0.65 and buyScore > sellScore + masterGap
+    masterDir := 0
+    holdBar := na
+
+// invalidación inmediata de dirección vieja cuando nace impulso contrario real
+if masterDir == -1 and fastBuyOverride
+    masterDir := 1
+    holdBar := bar_index
+    revBuy := 0
+    revSell := 0
+
+if masterDir == 1 and fastSellOverride
+    masterDir := -1
+    holdBar := bar_index
+    revBuy := 0
+    revSell := 0
+
+conflict = masterDir == 0
+
+//━━━━━━━━━━━━━━━━━━
+// PLAN / TEXTOS
+//━━━━━━━━━━━━━━━━━━
+stars(score) =>
+    score >= 92 ? "★★★★★" : score >= 84 ? "★★★★" : score >= 74 ? "★★★" : score >= 60 ? "★★" : score >= 45 ? "★" : "-"
+
+starsNum(score) =>
+    score >= 92 ? "5/5" : score >= 84 ? "4/5" : score >= 74 ? "3/5" : score >= 60 ? "2/5" : score >= 45 ? "1/5" : "0/5"
+
+scoreShown = masterDir == 1 ? buyScore : masterDir == -1 ? sellScore : math.max(buyScore, sellScore)
+
+entryFromRaw = masterDir == 1 ? (buyContinuation ? buyPullFrom : buyZoneFrom) : masterDir == -1 ? (sellContinuation ? sellPullFrom : sellZoneFrom) : na
+entryToRaw   = masterDir == 1 ? (buyContinuation ? buyPullTo : buyZoneTo) : masterDir == -1 ? (sellContinuation ? sellPullTo : sellZoneTo) : na
+
+entryLow = na(entryFromRaw) or na(entryToRaw) ? na : math.min(entryFromRaw, entryToRaw)
+entryHigh = na(entryFromRaw) or na(entryToRaw) ? na : math.max(entryFromRaw, entryToRaw)
+priceInsideEntry = not na(entryLow) and close >= entryLow and close <= entryHigh
+
+retroFrom = masterDir == 1 ? buyPullFrom : masterDir == -1 ? sellPullTo : na
+retroTo   = masterDir == 1 ? buyPullTo : masterDir == -1 ? sellPullFrom : na
+
+entryLine = masterDir == 1 ? entryHigh : masterDir == -1 ? entryLow : na
+
+// V48 TP/SL ESTRUCTURAL
+buyInvalidation = math.min(entryLow - atr * 0.35, math.min(internalLow - atr * 0.12, nz(bullObLow, entryLow) - atr * 0.10))
+sellInvalidation = math.max(entryHigh + atr * 0.35, math.max(internalHigh + atr * 0.12, nz(bearObHigh, entryHigh) + atr * 0.10))
+slAtrFallback = masterDir == 1 ? entryLow - atr * slAtr : masterDir == -1 ? entryHigh + atr * slAtr : na
+slLine = masterDir == 1 ? math.min(math.min(buyInvalidation, ictBuyInvalidation), slAtrFallback) : masterDir == -1 ? math.max(math.max(sellInvalidation, ictSellInvalidation), slAtrFallback) : na
+
+buyTp1Struct = internalHigh > entryHigh ? internalHigh : entryHigh + atr * tp1Atr
+buyTp2Struct = externalLiquidityAbove > buyTp1Struct ? externalLiquidityAbove : entryHigh + atr * tp2Atr
+sellTp1Struct = internalLow < entryLow ? internalLow : entryLow - atr * tp1Atr
+sellTp2Struct = externalLiquidityBelow < sellTp1Struct ? externalLiquidityBelow : entryLow - atr * tp2Atr
+
+tp1Line = masterDir == 1 ? math.max(entryHigh + atr * 0.60, buyTp1Struct) : masterDir == -1 ? math.min(entryLow - atr * 0.60, sellTp1Struct) : na
+tp2Line = masterDir == 1 ? math.max(tp1Line + atr * 0.45, buyTp2Struct) : masterDir == -1 ? math.min(tp1Line - atr * 0.45, sellTp2Struct) : na
+tp3Line = masterDir == 1 ? math.max(tp2Line + atr * 0.65, entryHigh + atr * tp3Atr) : masterDir == -1 ? math.min(tp2Line - atr * 0.65, entryLow - atr * tp3Atr) : na
+tp4Line = masterDir == 1 ? math.max(tp3Line + atr * 0.65, entryHigh + atr * tp4Atr) : masterDir == -1 ? math.min(tp3Line - atr * 0.65, entryLow - atr * tp4Atr) : na
+tp5Line = masterDir == 1 ? math.max(tp4Line + atr * 0.65, entryHigh + atr * tp5Atr) : masterDir == -1 ? math.min(tp4Line - atr * 0.65, entryLow - atr * tp5Atr) : na
+
+validNoFomo = masterDir == 1 ? buyNoFomo : masterDir == -1 ? sellNoFomo : false
+reactionOK = masterDir == 1 ? (absorbBuy or seqAbsorbBuy or buyPullbackDying or pocDefendedBuy or buyImpulse or smartBuyAllowed or macroEntryBuy) : masterDir == -1 ? (absorbSell or seqAbsorbSell or sellPullbackDying or pocDefendedSell or sellImpulse or smartSellAllowed or macroEntrySell) : false
+
+strongEntryBase = not conflict and priceInsideEntry and validNoFomo and reactionOK and scoreShown >= minEntryStrong
+softEntryBase = not conflict and priceInsideEntry and validNoFomo and reactionOK and scoreShown >= minEntrySoft and scoreShown < minEntryStrong
+
+// V48 TRIPLE DECISIÓN: BIAS -> SETUP -> TRIGGER
+locationQuality = masterDir == 1 ? locationBuyQuality : masterDir == -1 ? locationSellQuality : math.max(locationBuyQuality, locationSellQuality)
+biasV48 = motherBias == 1 ? "BUY" : motherBias == -1 ? "SELL" : masterDir == 1 ? "BUY" : masterDir == -1 ? "SELL" : "WAIT"
+
+setupBuyReady = masterDir == 1 and (institutionalBiasBuy or macroDiscount) and locationBuyQuality >= 55 and (poiBuyConfluence or externalSweepLow or internalSweepDown or macroSweepDown)
+setupSellReady = masterDir == -1 and (institutionalBiasSell or macroPremium) and locationSellQuality >= 55 and (poiSellConfluence or externalSweepHigh or internalSweepUp or macroSweepUp)
+
+triggerBuyV48 = setupBuyReady and validNoFomo and (microBosBuy or absorbBuy or seqAbsorbBuy or buyPullbackDying or ictBullMSS or fractalTriggerBuy) and (buyPressure or deltaAccelerationBuy or ictBullDisplacement or fractalTriggerBuy)
+triggerSellV48 = setupSellReady and validNoFomo and (microBosSell or absorbSell or seqAbsorbSell or sellPullbackDying or ictBearMSS or fractalTriggerSell) and (sellPressure or deltaAccelerationSell or ictBearDisplacement or fractalTriggerSell)
+
+// V50.2 DECISION FIRME: el score mide calidad, la secuencia autoriza la entrada.
+imxSeqMotherBuy = imxStructuralMotherDir == 1 or motherBias == 1 or institutionalBiasBuy
+imxSeqMotherSell = imxStructuralMotherDir == -1 or motherBias == -1 or institutionalBiasSell
+imxSeqPoiBuy = imxPoiBuyCount >= 2 or poiBuyConfluence or ictBullPdCount >= 1
+imxSeqPoiSell = imxPoiSellCount >= 2 or poiSellConfluence or ictBearPdCount >= 1
+imxSeqLiquidityBuy = sweepDown or internalSweepDown or externalSweepLow or macroSweepDown or ictSslRaid or macroBreakBuy
+imxSeqLiquiditySell = sweepUp or internalSweepUp or externalSweepHigh or macroSweepUp or ictBslRaid or macroBreakSell
+imxSeqStructureBuy = microBosBuy or ictBullMSS or ictBullChoch or fractalTriggerBuy
+imxSeqStructureSell = microBosSell or ictBearMSS or ictBearChoch or fractalTriggerSell
+imxSeqRetestBuy = priceInsideEntry and (buyPullbackDying or absorbBuy or bullObTouch or bullFvgActive or ictInBuyOTE or imxFibBuyHit)
+imxSeqRetestSell = priceInsideEntry and (sellPullbackDying or absorbSell or bearObTouch or bearFvgActive or ictInSellOTE or imxFibSellHit)
+imxSeqTriggerBuy = triggerBuyV48 or ictBuyTrigger or fractalTriggerBuy
+imxSeqTriggerSell = triggerSellV48 or ictSellTrigger or fractalTriggerSell
+
+imxSeqBuyCount = (imxSeqMotherBuy ? 1 : 0) + (imxSeqPoiBuy ? 1 : 0) + (imxSeqLiquidityBuy ? 1 : 0) + (imxSeqStructureBuy ? 1 : 0) + (imxSeqRetestBuy ? 1 : 0)
+imxSeqSellCount = (imxSeqMotherSell ? 1 : 0) + (imxSeqPoiSell ? 1 : 0) + (imxSeqLiquiditySell ? 1 : 0) + (imxSeqStructureSell ? 1 : 0) + (imxSeqRetestSell ? 1 : 0)
+
+imxRangeMid = (chHigh + chLow) * 0.50
+imxRangeCenter = inChannel and math.abs(close - imxRangeMid) <= chRange * 0.22
+imxDecisionSpaceBuy = not nearResist or microBosBuy or macroBreakBuy
+imxDecisionSpaceSell = not nearSupport or microBosSell or macroBreakSell
+
+imxFirmBuy = masterDir == 1 and imxSeqBuyCount >= 4 and imxSeqTriggerBuy and imxDecisionSpaceBuy and not imxRangeCenter and not lateBuyExhaustion and not antiTopBuy
+imxFirmSell = masterDir == -1 and imxSeqSellCount >= 4 and imxSeqTriggerSell and imxDecisionSpaceSell and not imxRangeCenter and not lateSellExhaustion and not antiBottomSell
+
+strongEntry = strongEntryBase and (imxFirmBuy or imxFirmSell)
+softEntry = softEntryBase and not strongEntry and ((masterDir == 1 and imxSeqBuyCount >= 3 and setupBuyReady) or (masterDir == -1 and imxSeqSellCount >= 3 and setupSellReady))
+
+imxSeqShown = masterDir == 1 ? imxSeqBuyCount : masterDir == -1 ? imxSeqSellCount : math.max(imxSeqBuyCount, imxSeqSellCount)
+imxFirmState = strongEntry ? "EXECUTE" : softEntry ? "ARMED" : imxRangeCenter ? "NO TRADE / CENTRO RANGO" : setupBuyReady or setupSellReady ? "ARMED / FALTA TRIGGER" : "WAIT"
+
+setupV48 = setupBuyReady or setupSellReady ? "LISTO" : motherBias != 0 ? "PREPARANDO" : "ESPERAR"
+triggerV48 = triggerBuyV48 ? "BUY CONFIRMADO" : triggerSellV48 ? "SELL CONFIRMADO" : setupBuyReady or setupSellReady ? "PENDIENTE" : "SIN GATILLO"
+
+externalLiqTxt = externalSweepLow ? "LOW BARRIDA ✓" : externalSweepHigh ? "HIGH BARRIDA ✓" : masterDir == 1 ? "HIGH PENDIENTE" : masterDir == -1 ? "LOW PENDIENTE" : "MAPA ACTIVO"
+internalLiqTxt = internalSweepDown ? "LOW INTERNA BARRIDA ✓" : internalSweepUp ? "HIGH INTERNA BARRIDA ✓" : internalEQH ? "EQH INTERNO PENDIENTE" : internalEQL ? "EQL INTERNO PENDIENTE" : "MICRO LIQ ACTIVA"
+
+poiTxt = (masterDir == 1 ? (bullObTouch and bullFvgActive ? "OB + FVG BUY" : bullObTouch ? "ORDER BLOCK BUY" : bullFvgActive ? "FVG BUY" : bullBreaker ? "BREAKER BUY" : h3Discount ? "H3 DISCOUNT" : "BUSCANDO POI") : masterDir == -1 ? (bearObTouch and bearFvgActive ? "OB + FVG SELL" : bearObTouch ? "ORDER BLOCK SELL" : bearFvgActive ? "FVG SELL" : bearBreaker ? "BREAKER SELL" : h3Premium ? "H3 PREMIUM" : "BUSCANDO POI") : "SIN POI") + " | " + (masterDir == 1 ? imxPoiTxtBuy : masterDir == -1 ? imxPoiTxtSell : "POI 0/5")
+
+pendingOrderTxt = ictBuyTrigger or triggerBuyV48 ? "BUY / GATILLO CONFIRMADO" : ictSellTrigger or triggerSellV48 ? "SELL / GATILLO CONFIRMADO" : ictBuySetupReady ? "ESPERAR BUY LIMIT EN PD ARRAY/OTE" : ictSellSetupReady ? "ESPERAR SELL LIMIT EN PD ARRAY/OTE" : setupBuyReady ? "ESPERAR BUY LIMIT" : setupSellReady ? "ESPERAR SELL LIMIT" : "SIN ORDEN PENDIENTE"
+pendingZoneTxt = na(entryLow) ? "-" : str.tostring(entryLow, format.mintick) + " → " + str.tostring(entryHigh, format.mintick)
+pendingInvalidTxt = na(slLine) ? "-" : str.tostring(slLine, format.mintick)
+institutionalActionTxt = triggerBuyV48 or triggerSellV48 ? "GATILLO CONFIRMADO → OPERABLE" : setupBuyReady or setupSellReady ? "NO ENTRAR TODAVÍA / ESPERAR GATILLO" : "ESPERAR UBICACIÓN + POI"
+
+enterNowTxt = conflict ? "NO ENTRAR" : strongEntry ? "ENTRAR YA FUERTE" : softEntry ? "ENTRAR SUAVE" : not validNoFomo ? "NO FOMO / NO PERSEGUIR" : not priceInsideEntry ? "ESPERAR TOQUE ZONA" : "ESPERAR REACCIÓN"
+decisionTxt = conflict ? "ESPERAR / CONFLICTO" : masterDir == 1 ? "BUY HOLD / CONTINUIDAD" : "SELL HOLD / CONTINUIDAD"
+operationTxt = conflict ? "WAIT" : masterDir == 1 ? "BUY " + stars(scoreShown) + " " + str.tostring(math.round(scoreShown)) + "%" : "SELL " + stars(scoreShown) + " " + str.tostring(math.round(scoreShown)) + "%"
+modoTxt = strongEntry ? "EXECUTE / ENTRAR FUERTE" : softEntry ? "ARMED / PREPARAR" : imxRangeCenter ? "RANGO CENTRO / NO TRADE" : setupBuyReady or setupSellReady ? "ARMED / ESPERA TRIGGER" : "WAIT / ESPERAR"
+faseTxt = (masterDir == 1 ? "BUY " : masterDir == -1 ? "SELL " : "") + "SECUENCIA " + str.tostring(imxSeqShown) + "/5"
+accionTxt = strongEntry ? (masterDir == 1 ? "TOMAR BUY EN ZONA" : "TOMAR SELL EN ZONA") : softEntry ? (masterDir == 1 ? "PREPARAR BUY / FALTA CONFIRMACIÓN" : "PREPARAR SELL / FALTA CONFIRMACIÓN") : imxRangeCenter ? "NO OPERAR CENTRO DE RANGO" : masterDir == 1 ? "BUY VIVO; ESPERAR SECUENCIA" : masterDir == -1 ? "SELL VIVO; ESPERAR SECUENCIA" : "ESPERAR"
+
+entryTxt = na(entryLow) ? "-" : str.tostring(entryLow, format.mintick) + " → " + str.tostring(entryHigh, format.mintick)
+retroTxt = na(retroFrom) ? "-" : str.tostring(retroFrom, format.mintick) + " → " + str.tostring(retroTo, format.mintick)
+tpTxt = na(tp1Line) ? "-" : str.tostring(tp1Line, format.mintick) + " / " + str.tostring(tp5Line, format.mintick)
+supportTxt = masterDir == 1 ? "SOPORTE " + str.tostring(supportStrength) + "%" : masterDir == -1 ? "RESISTENCIA " + str.tostring(resistStrength) + "%" : "SIN TOQUE"
+
+nearExitTxt = masterDir == 1 and nearResist ? "PROTEGER/CERRAR PARCIAL: RESISTENCIA " + str.tostring(resistStrength) + "%" : masterDir == -1 and nearSupport ? "PROTEGER/CERRAR PARCIAL: SOPORTE " + str.tostring(supportStrength) + "%" : "DEJAR CORRER SI FLOW SIGUE"
+
+nextZoneTxt = masterDir == 1 ? str.tostring(sellZoneFrom, format.mintick) + " → " + str.tostring(sellZoneTo, format.mintick) : masterDir == -1 ? str.tostring(buyZoneFrom, format.mintick) + " → " + str.tostring(buyZoneTo, format.mintick) : "-"
+
+originTxt = masterDir == 1 ? "BUY DESDE: " + str.tostring(entryLow, format.mintick) : masterDir == -1 ? "SELL DESDE: " + str.tostring(entryHigh, format.mintick) : "-"
+longPathTxt = masterDir == 1 ? str.tostring(entryLow, format.mintick) + " → " + str.tostring(tp5Line, format.mintick) : masterDir == -1 ? str.tostring(entryHigh, format.mintick) + " → " + str.tostring(tp5Line, format.mintick) : "-"
+pointRealTxt = strongEntry ? "PUNTO REAL FUERTE" : softEntry ? "PUNTO SUAVE" : "ESPERAR"
+trapTxt = trapBuy ? "TRAMPA SELL / BUY" : trapSell ? "TRAMPA BUY / SELL" : "SIN TRAMPA"
+absTxt = absorbBuy ? "ABSORCIÓN BUY" : absorbSell ? "ABSORCIÓN SELL" : seqAbsorbBuy ? "SECUENCIA BUY" : seqAbsorbSell ? "SECUENCIA SELL" : "NO CONFIRMADA"
+noteTxt = barsInDir < holdBarsMin ? "CONTINUIDAD VIVA / NO CAMBIAR POR RUIDO" : nearExitTxt
+lecturaMadreTxt = masterDir == 1 ? "BUY MADRE VIVO / BUSCAR REENTRADA" : masterDir == -1 ? "SELL MADRE VIVO / BUSCAR REENTRADA" : "ESPERAR MADRE"
+runnerLargoTxt = na(tp5Line) ? "-" : str.tostring(tp5Line, format.mintick)
+
+// TF text helpers
+tfDirTxt(d) => d == 1 ? "BUY" : d == -1 ? "SELL" : "NEUTRO"
+tfActionTxt(d) => d == 1 ? "BUSCAR BUY" : d == -1 ? "BUSCAR SELL" : "ESPERAR"
+tfLine(tf, d, rr) => tf + " " + tfDirTxt(d) + " | RSI " + str.tostring(math.round(rr)) + " | " + tfActionTxt(d)
+
+//━━━━━━━━━━━━━━━━━━
+// PLOTS
+//━━━━━━━━━━━━━━━━━━
+plot(ema9, "EMA 9", color=color.new(color.aqua, 0), linewidth=2, display=display.pane)
+plot(ema21, "EMA 21", color=color.new(color.orange, 0), linewidth=2, display=display.pane)
+plot(ema50, "EMA 50", color=color.new(color.fuchsia, 0), linewidth=2, display=display.pane)
+plot(ema200, "EMA 200", color=color.new(color.white, 35), linewidth=2, display=display.pane)
+
+// V50 mapa Previous Day: mínimo visual, máximo contexto.
+plot(showPrevDayMap ? pdh : na, "PDH", color=color.new(color.red, 20), linewidth=1, style=plot.style_linebr)
+plot(showPrevDayMap ? pdEq : na, "PD EQ 50%", color=color.new(color.white, 35), linewidth=1, style=plot.style_linebr)
+plot(showPrevDayMap ? pdl : na, "PDL", color=color.new(color.lime, 20), linewidth=1, style=plot.style_linebr)
+
+//━━━━━━━━━━━━━━━━━━
+// OBJETOS: CAJA + MAPA ENTRY/SL/TP
+//━━━━━━━━━━━━━━━━━━
+var box bxEntry = na
+var box bxRisk = na
+var box bxProfit = na
+var label labLive = na
+
+var line lnEntry = na
+var line lnSL = na
+var line lnTP1 = na
+var line lnTP2 = na
+var line lnTP3 = na
+var line lnTP4 = na
+var line lnTP5 = na
+
+var label tagEntry = na
+var label tagSL = na
+var label tagTP1 = na
+var label tagTP2 = na
+var label tagTP3 = na
+var label tagTP4 = na
+var label tagTP5 = na
+
+f_delete_objects() =>
+    box.delete(bxEntry)
+    box.delete(bxRisk)
+    box.delete(bxProfit)
+    label.delete(labLive)
+    line.delete(lnEntry)
+    line.delete(lnSL)
+    line.delete(lnTP1)
+    line.delete(lnTP2)
+    line.delete(lnTP3)
+    line.delete(lnTP4)
+    line.delete(lnTP5)
+    label.delete(tagEntry)
+    label.delete(tagSL)
+    label.delete(tagTP1)
+    label.delete(tagTP2)
+    label.delete(tagTP3)
+    label.delete(tagTP4)
+    label.delete(tagTP5)
+
+if barstate.islast
+    f_delete_objects()
+
+    if showMapBox and not conflict and not na(entryLow) and not na(entryHigh)
+        dirColor = masterDir == 1 ? color.lime : color.red
+        dirName = masterDir == 1 ? "BUY" : "SELL"
+
+        bxEntry := box.new(bar_index - 6, entryHigh, bar_index + boxBarsRight, entryLow, bgcolor=color.new(dirColor, 84), border_color=color.new(dirColor, 0), border_width=2, text="ZONA ENTRADA " + dirName + "\nDESDE " + str.tostring(entryLow, format.mintick) + "\nHASTA " + str.tostring(entryHigh, format.mintick) + "\n" + enterNowTxt + "\n★ " + stars(scoreShown) + " " + starsNum(scoreShown), text_color=color.white, text_size=size.normal)
+
+        bxRisk := box.new(bar_index - 6, math.max(entryHigh, slLine), bar_index + boxBarsRight, math.min(entryLow, slLine), bgcolor=color.new(color.red, 92), border_color=color.new(color.red, 45), border_width=1, text="RIESGO / INVALIDA\nSL " + str.tostring(slLine, format.mintick), text_color=color.white, text_size=size.small)
+
+        bxProfit := box.new(bar_index - 6, math.max(entryHigh, tp5Line), bar_index + boxBarsRight, math.min(entryLow, tp5Line), bgcolor=color.new(color.green, 93), border_color=color.new(color.green, 45), border_width=1, text="CAMINO OPERATIVO\nTP1 " + str.tostring(tp1Line, format.mintick) + "\nTP5/RUNNER " + str.tostring(tp5Line, format.mintick) + "\n" + nearExitTxt, text_color=color.white, text_size=size.small)
+
+    if showTPLevels and not conflict and not na(entryLine)
+        x1 = bar_index - 12
+        x2 = bar_index + boxBarsRight + 20
+
+        lnEntry := line.new(x1, entryLine, x2, entryLine, color=color.new(color.white, 0), width=2)
+        lnSL := line.new(x1, slLine, x2, slLine, color=color.new(color.red, 0), width=2)
+        lnTP1 := line.new(x1, tp1Line, x2, tp1Line, color=color.new(color.lime, 0), width=1)
+        lnTP2 := line.new(x1, tp2Line, x2, tp2Line, color=color.new(color.lime, 15), width=1)
+        lnTP3 := line.new(x1, tp3Line, x2, tp3Line, color=color.new(color.lime, 25), width=1)
+        lnTP4 := line.new(x1, tp4Line, x2, tp4Line, color=color.new(color.lime, 35), width=1)
+        lnTP5 := line.new(x1, tp5Line, x2, tp5Line, color=color.new(color.lime, 45), width=1)
+
+        tagEntry := label.new(x2, entryLine, "ENTRY: " + str.tostring(entryLine, format.mintick), style=label.style_label_left, color=color.new(color.white, 0), textcolor=color.black, size=size.normal)
+        tagSL := label.new(x2, slLine, "STOP LOSS: " + str.tostring(slLine, format.mintick), style=label.style_label_left, color=color.new(color.red, 0), textcolor=color.white, size=size.small)
+        tagTP1 := label.new(x2, tp1Line, "TP 1: " + str.tostring(tp1Line, format.mintick), style=label.style_label_left, color=color.new(color.lime, 0), textcolor=color.black, size=size.normal)
+        tagTP2 := label.new(x2, tp2Line, "TP 2: " + str.tostring(tp2Line, format.mintick), style=label.style_label_left, color=color.new(color.lime, 0), textcolor=color.black, size=size.small)
+        tagTP3 := label.new(x2, tp3Line, "TP 3: " + str.tostring(tp3Line, format.mintick), style=label.style_label_left, color=color.new(color.lime, 0), textcolor=color.black, size=size.small)
+        tagTP4 := label.new(x2, tp4Line, "TP 4: " + str.tostring(tp4Line, format.mintick), style=label.style_label_left, color=color.new(color.lime, 0), textcolor=color.black, size=size.small)
+        tagTP5 := label.new(x2, tp5Line, "TP 5: " + str.tostring(tp5Line, format.mintick), style=label.style_label_left, color=color.new(color.lime, 0), textcolor=color.black, size=size.small)
+
+    if showLiveLabel
+        yLab = masterDir == 1 ? low - atr * 1.2 : masterDir == -1 ? high + atr * 1.2 : high + atr
+        labLive := label.new(bar_index + 4, yLab, enterNowTxt + "\n" + operationTxt + "\nZONA " + entryTxt + "\nRETRO " + retroTxt + "\n" + nearExitTxt, style=masterDir == 1 ? label.style_label_up : masterDir == -1 ? label.style_label_down : label.style_label_left, color=masterDir == 1 ? color.new(color.green, 0) : masterDir == -1 ? color.new(color.red, 0) : color.new(color.orange, 0), textcolor=color.white, size=size.normal)
+
+//━━━━━━━━━━━━━━━━━━
+// UN SOLO PANEL FUSIONADO
+//━━━━━━━━━━━━━━━━━━
+bg = color.new(color.black, 0)
+bg2 = color.new(color.rgb(24,24,24), 0)
+bgWarn = color.new(color.rgb(45,0,0), 0)
+txtSize = panelSize == "Pequeño" ? size.small : size.normal
+headSize = panelSize == "Pequeño" ? size.small : size.normal
+
+var table pnl = table.new(position.middle_left, 2, 24, frame_color=color.new(color.yellow, 25), border_color=color.new(color.white, 45), border_width=1)
+
+if showOnePanel and barstate.islast
+    table.clear(pnl, 0, 0, 1, 23)
+
+    table.cell(pnl, 0, 0, "IMPULXOR V39.2", text_color=color.yellow, bgcolor=bg, text_size=headSize)
+    table.cell(pnl, 1, 0, syminfo.ticker + " " + timeframe.period, text_color=color.white, bgcolor=bg, text_size=headSize)
+
+    table.cell(pnl, 0, 1, "DECISIÓN IA", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 1, decisionTxt, text_color=masterDir == 1 ? color.lime : masterDir == -1 ? color.red : color.orange, bgcolor=masterDir == 1 ? color.new(color.green, 80) : masterDir == -1 ? color.new(color.red, 80) : bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 2, "OPERACIÓN", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 2, operationTxt, text_color=masterDir == 1 ? color.lime : masterDir == -1 ? color.red : color.orange, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 3, "MODO", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 3, modoTxt, text_color=strongEntry ? color.lime : softEntry ? color.yellow : color.aqua, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 4, "FUERZA", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 4, stars(scoreShown) + " " + starsNum(scoreShown) + " " + str.tostring(math.round(scoreShown)) + "%", text_color=color.yellow, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 5, "FASE VIVA", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 5, faseTxt, text_color=masterDir == 1 ? color.lime : masterDir == -1 ? color.red : color.orange, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 6, "ACCIÓN", text_color=color.white, bgcolor=bgWarn, text_size=txtSize)
+    table.cell(pnl, 1, 6, accionTxt, text_color=strongEntry ? color.lime : softEntry ? color.yellow : color.white, bgcolor=bgWarn, text_size=txtSize)
+
+    table.cell(pnl, 0, 7, "ZONA\nDESDE/HASTA", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 7, entryTxt, text_color=color.white, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 8, "RETROCESO", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 8, retroTxt, text_color=color.yellow, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 9, "NO ENTRAR\nDESPUÉS", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 9, na(slLine) ? "-" : str.tostring(slLine, format.mintick), text_color=color.orange, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 10, "TP SEGURO\nRUNNER", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 10, tpTxt, text_color=color.lime, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 11, "PUNTO REAL", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 11, pointRealTxt, text_color=strongEntry ? color.lime : softEntry ? color.yellow : color.orange, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 12, "TRAMPA", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 12, trapTxt, text_color=trapBuy ? color.lime : trapSell ? color.red : color.white, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 13, "SOP/RES %", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 13, supportTxt, text_color=masterDir == 1 ? color.lime : masterDir == -1 ? color.red : color.yellow, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 14, "ABSORCIÓN", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 14, absTxt, text_color=absorbBuy or seqAbsorbBuy ? color.lime : absorbSell or seqAbsorbSell ? color.red : color.orange, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 15, "BUY/SELL\nSCORE", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 15, str.tostring(math.round(buyScore)) + " / " + str.tostring(math.round(sellScore)), text_color=color.aqua, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 16, "FLOW", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 16, "BUY " + str.tostring(math.round(pressureBuyScore)) + "% / SELL " + str.tostring(math.round(pressureSellScore)) + "%", text_color=color.aqua, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 17, "NOTA", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 17, noteTxt, text_color=str.contains(noteTxt, "PROTEGER") ? color.orange : color.white, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 18, "ORIGEN\nIMPULSO", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 18, originTxt, text_color=color.yellow, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 19, "DESDE → HASTA\nLARGO", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 19, longPathTxt, text_color=color.white, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 20, "SIGUIENTE\nREACCIÓN", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 20, nextZoneTxt, text_color=color.aqua, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 21, "RUNNER LARGO", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 21, runnerLargoTxt, text_color=color.lime, bgcolor=bg, text_size=txtSize)
+
+    table.cell(pnl, 0, 22, "LECTURA\nMADRE", text_color=color.white, bgcolor=bg2, text_size=txtSize)
+    table.cell(pnl, 1, 22, lecturaMadreTxt, text_color=color.white, bgcolor=masterDir == 1 ? color.new(color.green, 0) : masterDir == -1 ? color.new(color.red, 0) : color.new(color.orange, 0), text_size=txtSize)
+
+    table.cell(pnl, 0, 23, "ALERTA\nFINAL", text_color=color.white, bgcolor=bgWarn, text_size=txtSize)
+    table.cell(pnl, 1, 23, enterNowTxt + " | " + nearExitTxt, text_color=strongEntry ? color.lime : softEntry ? color.yellow : color.white, bgcolor=bgWarn, text_size=txtSize)
+
+//━━━━━━━━━━━━━━━━━━
+// TABLA TF SEPARADA COMO LA IMAGEN
+//━━━━━━━━━━━━━━━━━━
+tfBg = color.new(color.rgb(45,45,45), 0)
+tfBg2 = color.new(color.rgb(65,65,65), 0)
+tfHead = color.new(color.rgb(70,70,70), 0)
+
+tfDirColor(d) =>
+    d == 1 ? color.new(color.green, 0) : d == -1 ? color.new(color.red, 0) : color.new(color.orange, 0)
+
+tfActionColor(d) =>
+    d == 1 ? color.new(color.green, 0) : d == -1 ? color.new(color.red, 0) : color.new(color.orange, 0)
+
+var table tfp = table.new(position.bottom_center, 4, 9, frame_color=color.new(color.white, 35), border_color=color.new(color.white, 55), border_width=1)
+
+if showTfPanel and barstate.islast
+    table.clear(tfp, 0, 0, 3, 8)
+
+    table.cell(tfp, 0, 0, "TF", text_color=color.yellow, bgcolor=tfHead, text_size=size.small)
+    table.cell(tfp, 1, 0, "DIR", text_color=color.yellow, bgcolor=tfHead, text_size=size.small)
+    table.cell(tfp, 2, 0, "RSI", text_color=color.yellow, bgcolor=tfHead, text_size=size.small)
+    table.cell(tfp, 3, 0, "ACCIÓN", text_color=color.yellow, bgcolor=tfHead, text_size=size.small)
+
+    table.cell(tfp, 0, 1, "M1", text_color=color.white, bgcolor=tfBg, text_size=size.small)
+    table.cell(tfp, 1, 1, tfDirTxt(d1), text_color=color.white, bgcolor=tfDirColor(d1), text_size=size.small)
+    table.cell(tfp, 2, 1, str.tostring(math.round(r1)), text_color=color.white, bgcolor=tfBg2, text_size=size.small)
+    table.cell(tfp, 3, 1, tfActionTxt(d1), text_color=color.white, bgcolor=tfActionColor(d1), text_size=size.small)
+
+    table.cell(tfp, 0, 2, "M5", text_color=color.white, bgcolor=tfBg, text_size=size.small)
+    table.cell(tfp, 1, 2, tfDirTxt(d5), text_color=color.white, bgcolor=tfDirColor(d5), text_size=size.small)
+    table.cell(tfp, 2, 2, str.tostring(math.round(r5)), text_color=color.white, bgcolor=tfBg2, text_size=size.small)
+    table.cell(tfp, 3, 2, tfActionTxt(d5), text_color=color.white, bgcolor=tfActionColor(d5), text_size=size.small)
+
+    table.cell(tfp, 0, 3, "M15", text_color=color.white, bgcolor=tfBg, text_size=size.small)
+    table.cell(tfp, 1, 3, tfDirTxt(d15), text_color=color.white, bgcolor=tfDirColor(d15), text_size=size.small)
+    table.cell(tfp, 2, 3, str.tostring(math.round(r15)), text_color=color.white, bgcolor=tfBg2, text_size=size.small)
+    table.cell(tfp, 3, 3, tfActionTxt(d15), text_color=color.white, bgcolor=tfActionColor(d15), text_size=size.small)
+
+    table.cell(tfp, 0, 4, "M30", text_color=color.white, bgcolor=tfBg, text_size=size.small)
+    table.cell(tfp, 1, 4, tfDirTxt(d30), text_color=color.white, bgcolor=tfDirColor(d30), text_size=size.small)
+    table.cell(tfp, 2, 4, str.tostring(math.round(r30)), text_color=color.white, bgcolor=tfBg2, text_size=size.small)
+    table.cell(tfp, 3, 4, tfActionTxt(d30), text_color=color.white, bgcolor=tfActionColor(d30), text_size=size.small)
+
+    table.cell(tfp, 0, 5, "H1", text_color=color.white, bgcolor=tfBg, text_size=size.small)
+    table.cell(tfp, 1, 5, tfDirTxt(d60), text_color=color.white, bgcolor=tfDirColor(d60), text_size=size.small)
+    table.cell(tfp, 2, 5, str.tostring(math.round(r60)), text_color=color.white, bgcolor=tfBg2, text_size=size.small)
+    table.cell(tfp, 3, 5, tfActionTxt(d60), text_color=color.white, bgcolor=tfActionColor(d60), text_size=size.small)
+
+    table.cell(tfp, 0, 6, "H3", text_color=color.white, bgcolor=tfBg, text_size=size.small)
+    table.cell(tfp, 1, 6, tfDirTxt(d180), text_color=color.white, bgcolor=tfDirColor(d180), text_size=size.small)
+    table.cell(tfp, 2, 6, str.tostring(math.round(r180)), text_color=color.white, bgcolor=tfBg2, text_size=size.small)
+    table.cell(tfp, 3, 6, tfActionTxt(d180), text_color=color.white, bgcolor=tfActionColor(d180), text_size=size.small)
+
+    table.cell(tfp, 0, 7, "H4", text_color=color.white, bgcolor=tfBg, text_size=size.small)
+    table.cell(tfp, 1, 7, tfDirTxt(d240), text_color=color.white, bgcolor=tfDirColor(d240), text_size=size.small)
+    table.cell(tfp, 2, 7, str.tostring(math.round(r240)), text_color=color.white, bgcolor=tfBg2, text_size=size.small)
+    table.cell(tfp, 3, 7, tfActionTxt(d240), text_color=color.white, bgcolor=tfActionColor(d240), text_size=size.small)
+
+    table.cell(tfp, 0, 8, "D", text_color=color.white, bgcolor=tfBg, text_size=size.small)
+    table.cell(tfp, 1, 8, tfDirTxt(dD), text_color=color.white, bgcolor=tfDirColor(dD), text_size=size.small)
+    table.cell(tfp, 2, 8, str.tostring(math.round(rD)), text_color=color.white, bgcolor=tfBg2, text_size=size.small)
+    table.cell(tfp, 3, 8, tfActionTxt(dD), text_color=color.white, bgcolor=tfActionColor(dD), text_size=size.small)
+
+//━━━━━━━━━━━━━━━━━━
+// AVISO DERECHO VIVO + MEMORIA INSTITUCIONAL
+// Panel fijo independiente. NO toca ni reconstruye la caja original.
+// Claridad: tendencia madre, retroceso, soporte/resistencia, continuidad/protección.
+//━━━━━━━━━━━━━━━━━━
+// Cambio real endurecido:
+// No basta que masterDir cambie. Debe haber estructura contraria + MTF + no FOMO.
+// Si no cumple, se trata como retroceso/falsa alarma y NO manda cerrar por cambio.
+rawChangeTrend = masterDir != 0 and prevMasterDirNotice != 0 and masterDir != prevMasterDirNotice
+realSellChange = rawChangeTrend and masterDir == -1 and sellScore > buyScore + masterGap and (microBosSell or absorbSell or trapSell or sellContinuation) and (d5 == -1 or d15 == -1 or mtfSell > mtfBuy) and sellNoFomo
+realBuyChange  = rawChangeTrend and masterDir == 1 and buyScore > sellScore + masterGap and (microBosBuy or absorbBuy or trapBuy or buyContinuation) and (d5 == 1 or d15 == 1 or mtfBuy > mtfSell) and buyNoFomo
+changeTrendNow = realBuyChange or realSellChange
+
+falseChangeWatch = rawChangeTrend and not changeTrendNow
+retroNow = falseChangeWatch or (masterDir == 1 ? buyPullbackDying : masterDir == -1 ? sellPullbackDying : false)
+closeNow = str.contains(nearExitTxt, "PROTEGER") or str.contains(nearExitTxt, "CERRAR")
+
+// AVISO PREVENTIVO DE SOPORTE / RESISTENCIA TOCADA
+// No da entrada todavía: avisa que el scanner está observando reacción institucional.
+preventBuyWatch = supportTouch and not strongEntry and not softEntry and not absorbBuy and not buyContinuation and not closeNow and (d5 == 1 or d15 == 1 or mtfBuy >= mtfSell)
+preventSellWatch = resistTouch and not strongEntry and not softEntry and not absorbSell and not sellContinuation and not closeNow and (d5 == -1 or d15 == -1 or mtfSell >= mtfBuy)
+preventNow = preventBuyWatch or preventSellWatch
+
+//━━━━━━━━━━━━━━━━━━
+// LISTA NUEVA DE ANUNCIOS VIVOS TIPO V37
+// Solo agrega lectura al panel derecho: NO cambia caja, NO quita paneles, NO cambia visual principal.
+// Objetivo: cuando hay BUY/SELL vivo pero el precio está contra POI/SOPORTE/RESISTENCIA fuerte,
+// anuncia NO OPERAR TODAVÍA / ESPERAR ROMPIMIENTO O RETROCESO / SIN ESPACIO OPERATIVO.
+//━━━━━━━━━━━━━━━━━━
+freeSpaceBuyAtr  = atr > 0 ? math.max(0.0, sellZoneFrom - close) / atr : 999.0
+freeSpaceSellAtr = atr > 0 ? math.max(0.0, close - buyZoneTo) / atr : 999.0
+
+buyStrongResistanceAhead = masterDir == 1 and nearResist and resistStrength >= 70 and not microBosBuy
+sellStrongSupportAhead   = masterDir == -1 and nearSupport and supportStrength >= 70 and not microBosSell
+
+buyNoOperationalSpace  = masterDir == 1 and freeSpaceBuyAtr <= 0.85 and resistStrength >= 65 and not microBosBuy
+sellNoOperationalSpace = masterDir == -1 and freeSpaceSellAtr <= 0.85 and supportStrength >= 65 and not microBosSell
+
+buyWaitContinuation = (buyStrongResistanceAhead or buyNoOperationalSpace or antiTopBuy) and not strongEntry and not changeTrendNow
+sellWaitContinuation = (sellStrongSupportAhead or sellNoOperationalSpace or antiBottomSell) and not strongEntry and not changeTrendNow
+
+lateralWait = inChannel and compression and math.abs(buyScore - sellScore) <= masterGap and not strongEntry and not softEntry
+noSpaceWait = buyWaitContinuation or sellWaitContinuation or lateralWait
+
+preNow = preImpulseNow and not strongEntry and not softEntry and not closeNow and not changeTrendNow and not preventNow and not noSpaceWait
+runnerNow = not strongEntry and not softEntry and not preNow and not preventNow and not retroNow and not closeNow and not changeTrendNow and not conflict and reactionOK and validNoFomo
+
+//━━━━━━━━━━━━━━━━━━
+// IMPULXOR V41 INSTITUTIONAL PRECISION ENGINE
+// Agregado SIN cambiar paneles ni visual principal.
+// Va después de preNow / runnerNow para evitar errores.
+//━━━━━━━━━━━━━━━━━━
+tickVelocity = math.abs(close - close[1]) / math.max(atr, syminfo.mintick)
+tickVelocityFast = ta.ema(tickVelocity, 3)
+tickVelocitySlow = ta.ema(tickVelocity, 12)
+
+microCompression = ta.stdev(close, 8) < ta.stdev(close, 21) * 0.72
+explosivePressureBuy = tickVelocityFast > tickVelocitySlow * 1.15 and buyPressure and close > ema9
+explosivePressureSell = tickVelocityFast > tickVelocitySlow * 1.15 and sellPressure and close < ema9
+
+continuationBuyScore = 0.0
+continuationBuyScore += buyPressure ? 18.0 : 0.0
+continuationBuyScore += buyContinuation ? 20.0 : 0.0
+continuationBuyScore += explosivePressureBuy ? 16.0 : 0.0
+continuationBuyScore += microBosBuy ? 14.0 : 0.0
+continuationBuyScore += smartBuyAllowed ? 14.0 : 0.0
+continuationBuyScore += microCompression ? 10.0 : 0.0
+continuationBuyScore += deltaAccelerationBuy ? 8.0 : 0.0
+continuationBuyScore := math.min(100.0, continuationBuyScore)
+
+continuationSellScore = 0.0
+continuationSellScore += sellPressure ? 18.0 : 0.0
+continuationSellScore += sellContinuation ? 20.0 : 0.0
+continuationSellScore += explosivePressureSell ? 16.0 : 0.0
+continuationSellScore += microBosSell ? 14.0 : 0.0
+continuationSellScore += smartSellAllowed ? 14.0 : 0.0
+continuationSellScore += microCompression ? 10.0 : 0.0
+continuationSellScore += deltaAccelerationSell ? 8.0 : 0.0
+continuationSellScore := math.min(100.0, continuationSellScore)
+
+continuationReal = masterDir == 1 ? continuationBuyScore : masterDir == -1 ? continuationSellScore : math.max(continuationBuyScore, continuationSellScore)
+
+timingPhase = explosivePressureBuy or explosivePressureSell ? "EXPLOSIÓN" :
+     preNow ? "NACIENDO" :
+     retroNow ? "RESPIRANDO" :
+     lateBuyExhaustion or lateSellExhaustion ? "AGOTAMIENTO" :
+     "OBSERVANDO"
+
+spaceOperational = masterDir == 1 ? freeSpaceBuyAtr : masterDir == -1 ? freeSpaceSellAtr : 0.0
+spaceOperationalPct = math.round(math.min(100.0, spaceOperational * 45.0))
+
+institutionalTrapBuy = sweepUp and buyPressure and upperWick > bodySafe * 1.2
+institutionalTrapSell = sweepDown and sellPressure and lowerWick > bodySafe * 1.2
+
+noTradeEngine = lateBuyExhaustion or lateSellExhaustion or noSpaceWait or conflict or closeNow or (masterDir == 1 and macroNoBuyTop) or (masterDir == -1 and macroNoSellBottom)
+
+//━━━━━━━━━━━━━━━━━━
+// IMPULXOR V42 EXECUTION INTELLIGENCE
+// Agregado SIN cambiar paneles/cajas principales.
+// Objetivo: decir CUÁNDO actuar: entrada sniper, reentrada, entrada tarde o esperar.
+//━━━━━━━━━━━━━━━━━━
+sniperBuy = masterDir == 1 and not noTradeEngine and validNoFomo and spaceOperationalPct >= 35 and continuationReal >= 62 and (microBosBuy or absorbBuy or smartBuyAllowed or explosivePressureBuy or macroEntryBuy) and (buyPressure or deltaAccelerationBuy)
+sniperSell = masterDir == -1 and not noTradeEngine and validNoFomo and spaceOperationalPct >= 35 and continuationReal >= 62 and (microBosSell or absorbSell or smartSellAllowed or explosivePressureSell or macroEntrySell) and (sellPressure or deltaAccelerationSell)
+
+reEntryBuy = masterDir == 1 and not noTradeEngine and retroNow and continuationReal >= 55 and spaceOperationalPct >= 30 and (buyPullbackDying or absorbBuy or pocDefendedBuy)
+reEntrySell = masterDir == -1 and not noTradeEngine and retroNow and continuationReal >= 55 and spaceOperationalPct >= 30 and (sellPullbackDying or absorbSell or pocDefendedSell)
+
+lateEntryBuy = masterDir == 1 and (lateBuyExhaustion or antiTopBuy or spaceOperationalPct <= 25)
+lateEntrySell = masterDir == -1 and (lateSellExhaustion or antiBottomSell or spaceOperationalPct <= 25)
+
+rareOpportunityBuy = sniperBuy and continuationReal >= 78 and spaceOperationalPct >= 55 and scoreShown >= minEntryStrong
+rareOpportunitySell = sniperSell and continuationReal >= 78 and spaceOperationalPct >= 55 and scoreShown >= minEntryStrong
+
+executionMode = rareOpportunityBuy ? "🔥 OPORTUNIDAD BUY ALTA" :
+     rareOpportunitySell ? "🔥 OPORTUNIDAD SELL ALTA" :
+     sniperBuy ? "🟢 ENTRADA SNIPER BUY" :
+     sniperSell ? "🔴 ENTRADA SNIPER SELL" :
+     reEntryBuy ? "🟢 REENTRADA BUY VÁLIDA" :
+     reEntrySell ? "🔴 REENTRADA SELL VÁLIDA" :
+     lateEntryBuy or lateEntrySell ? "⚠ ENTRADA TARDE / NO PERSEGUIR" :
+     noTradeEngine ? "⛔ NO OPERAR" :
+     preNow ? "⏳ ESPERAR GATILLO" :
+     runnerNow ? "✅ DEJAR CORRER" :
+     "👁 ESPERAR REACCIÓN"
+
+executionScore = math.round(math.min(100.0, math.max(0.0, continuationReal * 0.45 + scoreShown * 0.35 + spaceOperationalPct * 0.20)))
+
+executionAction = rareOpportunityBuy or rareOpportunitySell ? "OPORTUNIDAD ALTA / SOLO SI RESPETA ZONA" :
+     sniperBuy or sniperSell ? "GATILLO ACTIVO / ENTRADA PRECISA" :
+     reEntryBuy or reEntrySell ? "REENTRADA EN RETROCESO SANO" :
+     lateEntryBuy or lateEntrySell ? "NO PERSEGUIR / ESPERAR NUEVA ZONA" :
+     noTradeEngine ? "BLOQUEADO POR FILTRO" :
+     preNow ? "PREPARAR / AÚN NO TOCAR" :
+     runnerNow ? "MANTENER / PROTEGER" :
+     "ESPERAR CONFIRMACIÓN"
+
+executionRisk = noTradeEngine or lateEntryBuy or lateEntrySell ? "ALTO" :
+     rareOpportunityBuy or rareOpportunitySell or sniperBuy or sniperSell ? "CONTROLADO" :
+     reEntryBuy or reEntrySell ? "MEDIO" :
+     "ESPERAR"
+
+//━━━━━━━━━━━━━━━━━━
+// IMPULXOR V43 SNIPER TIMING ENGINE
+// Agregado SIN cambiar paneles/cajas principales.
+// Objetivo: detectar disparo, micro retest, última limpieza y no perseguir.
+//━━━━━━━━━━━━━━━━━━
+microRetestBuy = masterDir == 1 and close >= ema9 - atr * 0.18 and close <= ema21 + atr * 0.35 and low <= ema9 + atr * 0.20 and (buyPressure or lowerWick > bodySafe * 0.55)
+microRetestSell = masterDir == -1 and close <= ema9 + atr * 0.18 and close >= ema21 - atr * 0.35 and high >= ema9 - atr * 0.20 and (sellPressure or upperWick > bodySafe * 0.55)
+
+lastCleanBuy = sweepDown and close > open and close > ema9 and (absorbBuy or seqAbsorbBuy or pocDefendedBuy)
+lastCleanSell = sweepUp and close < open and close < ema9 and (absorbSell or seqAbsorbSell or pocDefendedSell)
+
+realAccelBuy = explosivePressureBuy and tickVelocityFast > tickVelocitySlow * 1.28 and closeNearHigh and body >= atr * 0.14
+realAccelSell = explosivePressureSell and tickVelocityFast > tickVelocitySlow * 1.28 and closeNearLow and body >= atr * 0.14
+
+fakeAccelBuy = realAccelBuy and nearResist and resistStrength >= 68 and not microBosBuy
+fakeAccelSell = realAccelSell and nearSupport and supportStrength >= 68 and not microBosSell
+
+sniperShotBuy = masterDir == 1 and not noTradeEngine and not fakeAccelBuy and spaceOperationalPct >= 38 and continuationReal >= 68 and executionScore >= 62 and (microRetestBuy or lastCleanBuy or realAccelBuy or sniperBuy)
+sniperShotSell = masterDir == -1 and not noTradeEngine and not fakeAccelSell and spaceOperationalPct >= 38 and continuationReal >= 68 and executionScore >= 62 and (microRetestSell or lastCleanSell or realAccelSell or sniperSell)
+
+goneBuy = masterDir == 1 and (close > ema21 + atr * 1.75 or spaceOperationalPct <= 22 or lateBuyExhaustion)
+goneSell = masterDir == -1 and (close < ema21 - atr * 1.75 or spaceOperationalPct <= 22 or lateSellExhaustion)
+
+sniperTimingScore = math.round(math.min(100.0, math.max(0.0, continuationReal * 0.34 + executionScore * 0.34 + spaceOperationalPct * 0.18 + (realAccelBuy or realAccelSell ? 10.0 : 0.0) + (microRetestBuy or microRetestSell ? 8.0 : 0.0))))
+
+sniperMode = sniperShotBuy ? "🔥 DISPARO BUY" :
+     sniperShotSell ? "🔥 DISPARO SELL" :
+     microRetestBuy ? "🟢 MICRO RETEST BUY" :
+     microRetestSell ? "🔴 MICRO RETEST SELL" :
+     lastCleanBuy ? "🟢 ÚLTIMA LIMPIEZA BUY" :
+     lastCleanSell ? "🔴 ÚLTIMA LIMPIEZA SELL" :
+     goneBuy or goneSell ? "⛔ YA SE FUE / NO PERSEGUIR" :
+     fakeAccelBuy or fakeAccelSell ? "⚠ ACELERACIÓN FALSA" :
+     "ESPERAR TIMING"
+
+sniperAction = sniperShotBuy or sniperShotSell ? "DISPARO ACTIVO / SOLO CON GESTIÓN" :
+     microRetestBuy or microRetestSell ? "ESPERAR CIERRE DE CONFIRMACIÓN" :
+     lastCleanBuy or lastCleanSell ? "PREPARAR GATILLO DESPUÉS DE BARRIDA" :
+     goneBuy or goneSell ? "NO ENTRAR / ESPERAR NUEVA ZONA" :
+     fakeAccelBuy or fakeAccelSell ? "NO TOCAR / RIESGO DE RECHAZO" :
+     "ESPERAR SEÑAL SNIPER"
+
+//━━━━━━━━━━━━━━━━━━
+// IMPULXOR V44 ADAPTIVE MARKET MEMORY ENGINE
+// Agregado SIN cambiar visual principal.
+// Objetivo: memoria reciente del mercado: trampas, continuación, agotamiento y calidad del flow.
+//━━━━━━━━━━━━━━━━━━
+memLen = 34
+
+trapMemory = math.sum((trapBuy or trapSell or institutionalTrapBuy or institutionalTrapSell or fakeAccelBuy or fakeAccelSell) ? 1.0 : 0.0, memLen)
+continuationMemory = math.sum((sniperShotBuy or sniperShotSell or runnerNow or continuationReal >= 70) ? 1.0 : 0.0, memLen)
+exhaustionMemory = math.sum((lateBuyExhaustion or lateSellExhaustion or goneBuy or goneSell) ? 1.0 : 0.0, memLen)
+compressionMemory = math.sum((compression or microCompression) ? 1.0 : 0.0, memLen)
+
+trapPct = math.round(math.min(100.0, trapMemory / memLen * 100.0))
+continuationPct = math.round(math.min(100.0, continuationMemory / memLen * 100.0))
+exhaustionPct = math.round(math.min(100.0, exhaustionMemory / memLen * 100.0))
+compressionPct = math.round(math.min(100.0, compressionMemory / memLen * 100.0))
+
+marketQualityScore = math.round(math.max(0.0, math.min(100.0, continuationPct * 0.45 + spaceOperationalPct * 0.25 + sniperTimingScore * 0.20 - trapPct * 0.25 - exhaustionPct * 0.20)))
+
+marketMode = trapPct >= 34 and continuationPct < 35 ? "MERCADO TRAMPOSO" :
+     exhaustionPct >= 38 ? "MERCADO AGOTADO" :
+     compressionPct >= 42 ? "MERCADO COMPRIMIDO" :
+     continuationPct >= 45 and marketQualityScore >= 60 ? "MERCADO TENDENCIAL" :
+     inChannel ? "MERCADO LATERAL" :
+     "MERCADO MIXTO"
+
+adaptiveAggression = marketQualityScore >= 75 and trapPct < 25 ? "AGRESIVO CONTROLADO" :
+     marketQualityScore >= 55 ? "NORMAL" :
+     trapPct >= 34 or exhaustionPct >= 38 ? "DEFENSIVO" :
+     "ESPERAR"
+
+dangerDay = trapPct >= 38 or exhaustionPct >= 42 or marketQualityScore <= 35
+memoryWarning = dangerDay ? "⚠ DÍA PELIGROSO / BAJAR RIESGO" :
+     continuationPct >= 48 and trapPct < 28 ? "✅ FLOW FAVORABLE" :
+     compressionPct >= 42 ? "⏳ COMPRESIÓN / ESPERAR EXPLOSIÓN" :
+     "OBSERVAR MEMORIA"
+
+adaptivePermission = not dangerDay and marketQualityScore >= 45
+
+//━━━━━━━━━━━━━━━━━━
+// IMPULXOR V45 — RETEST & MICROSTRUCTURE CONFIRMATION ENGINE
+// NO quita paneles. NO mueve paneles. NO cambia visual original.
+// Solo agrega lógica y filas al panel de decisión.
+//━━━━━━━━━━━━━━━━━━
+retestBuyFrom  = ema21 - atr * 0.22
+retestBuyTo    = ema9  + atr * 0.28
+retestSellFrom = ema9  - atr * 0.28
+retestSellTo   = ema21 + atr * 0.22
+
+entryBuyFrom   = math.min(retestBuyFrom, retestBuyTo)
+entryBuyTo     = math.max(retestBuyFrom, retestBuyTo)
+entrySellFrom  = math.min(retestSellFrom, retestSellTo)
+entrySellTo    = math.max(retestSellFrom, retestSellTo)
+
+touchRetestBuy  = masterDir == 1 and low <= entryBuyTo and high >= entryBuyFrom
+touchRetestSell = masterDir == -1 and high >= entrySellFrom and low <= entrySellTo
+
+rejectBuyCandle  = touchRetestBuy and close > open and lowerWick > bodySafe * 0.65 and close > ema9
+rejectSellCandle = touchRetestSell and close < open and upperWick > bodySafe * 0.65 and close < ema9
+
+retestMiniBosBuy  = rejectBuyCandle and close > ta.highest(high[1], 3)
+retestMiniBosSell = rejectSellCandle and close < ta.lowest(low[1], 3)
+
+advExhaustBuy  = masterDir == 1 and (lateBuyExhaustion or antiTopBuy or (upperWick > bodySafe * 1.35 and close < high - atr * 0.18) or goneBuy)
+advExhaustSell = masterDir == -1 and (lateSellExhaustion or antiBottomSell or (lowerWick > bodySafe * 1.35 and close > low + atr * 0.18) or goneSell)
+
+continuationAliveBuy  = masterDir == 1 and continuationReal >= 45 and not advExhaustBuy
+continuationAliveSell = masterDir == -1 and continuationReal >= 45 and not advExhaustSell
+
+retestState = masterDir == 1 ? (retestMiniBosBuy ? "RETEST BUY CONFIRMADO" : rejectBuyCandle ? "RECHAZO BUY / FALTA MINI BOS" : touchRetestBuy ? "TOCÓ ZONA BUY / ESPERAR RECHAZO" : continuationAliveBuy ? "ESPERAR RETEST BUY" : "SIN RETEST BUY") : masterDir == -1 ? (retestMiniBosSell ? "RETEST SELL CONFIRMADO" : rejectSellCandle ? "RECHAZO SELL / FALTA MINI BOS" : touchRetestSell ? "TOCÓ ZONA SELL / ESPERAR RECHAZO" : continuationAliveSell ? "ESPERAR RETEST SELL" : "SIN RETEST SELL") : "SIN DIRECCIÓN"
+
+blockBeforeRetest = (masterDir == 1 and continuationAliveBuy and not retestMiniBosBuy) or (masterDir == -1 and continuationAliveSell and not retestMiniBosSell)
+
+syntheticInstitutionalBuy = masterDir == 1 and retestMiniBosBuy and adaptivePermission and marketQualityScore >= 40 and not advExhaustBuy and not noTradeEngine
+syntheticInstitutionalSell = masterDir == -1 and retestMiniBosSell and adaptivePermission and marketQualityScore >= 40 and not advExhaustSell and not noTradeEngine
+
+v45EntryBuy  = syntheticInstitutionalBuy and spaceOperationalPct >= 28
+v45EntrySell = syntheticInstitutionalSell and spaceOperationalPct >= 28
+
+v45EntryBlocked = blockBeforeRetest or advExhaustBuy or advExhaustSell or noTradeEngine
+
+v45Action = v45EntryBuy ? "ENTRADA BUY CONFIRMADA" : v45EntrySell ? "ENTRADA SELL CONFIRMADA" : blockBeforeRetest ? "BLOQUEADA: ESPERAR RETEST" : advExhaustBuy or advExhaustSell ? "BLOQUEADA: AGOTAMIENTO" : noTradeEngine ? "BLOQUEADA: FILTRO ACTIVO" : "ESPERAR MICROESTRUCTURA"
+v45Reason = v45EntryBuy or v45EntrySell ? "RETEST + RECHAZO + MINI BOS" : blockBeforeRetest ? "CONTINUIDAD NO ES ENTRADA" : advExhaustBuy ? "NO COMPRAR TECHO" : advExhaustSell ? "NO VENDER PISO" : "FALTA CONFIRMACIÓN"
+v45ZoneTxt = masterDir == 1 ? "RETRO BUY: " + str.tostring(entryBuyFrom, format.mintick) + " → " + str.tostring(entryBuyTo, format.mintick) : masterDir == -1 ? "RETRO SELL: " + str.tostring(entrySellFrom, format.mintick) + " → " + str.tostring(entrySellTo, format.mintick) : "SIN ZONA"
+v45EntryZoneTxt = masterDir == 1 ? "ENTRADA BUY: " + str.tostring(entryBuyFrom, format.mintick) + " → " + str.tostring(entryBuyTo, format.mintick) : masterDir == -1 ? "ENTRADA SELL: " + str.tostring(entrySellFrom, format.mintick) + " → " + str.tostring(entrySellTo, format.mintick) : "SIN ENTRADA"
+iaAdaptativaSintetica = adaptiveAggression + " | " + marketMode
+
+
+//━━━━━━━━━━━━━━━━━━
+// IMPULXOR V46 — REACTION STRENGTH ENGINE
+// NO mueve paneles. NO reconstruye paneles. NO cambia tamaño visual.
+// Agrega detección anticipada de punto de reacción contrario DESDE/HASTA
+// y clasifica fuerza: DÉBIL / MEDIA / FUERTE / EXTREMA.
+//━━━━━━━━━━━━━━━━━━
+
+// Distancia a zona contraria de reacción antes de tocar
+distToBuyReactionAtr  = atr > 0 ? math.max(0.0, close - buyZoneTo) / atr : 999.0
+distToSellReactionAtr = atr > 0 ? math.max(0.0, sellZoneFrom - close) / atr : 999.0
+
+approachBuyReaction  = masterDir == -1 and distToBuyReactionAtr <= 0.85 and close > buyZoneFrom
+approachSellReaction = masterDir == 1 and distToSellReactionAtr <= 0.85 and close < sellZoneTo
+
+// Zona contraria esperada DESDE/HASTA
+reactionBuyFrom  = buyZoneFrom
+reactionBuyTo    = math.max(buyZoneTo, ema21 + atr * 0.25)
+reactionSellFrom = math.min(sellZoneFrom, ema21 - atr * 0.25)
+reactionSellTo   = sellZoneTo
+
+// Lectura de fuerza de reacción contraria
+reactionBuyRaw = 0.0
+reactionBuyRaw += approachBuyReaction ? 18.0 : 0.0
+reactionBuyRaw += nearSupport ? 16.0 : 0.0
+reactionBuyRaw += supportStrength >= 70 ? 18.0 : supportStrength >= 55 ? 10.0 : 0.0
+reactionBuyRaw += lowerWick > bodySafe * 0.85 ? 14.0 : 0.0
+reactionBuyRaw += sweepDown ? 16.0 : 0.0
+reactionBuyRaw += absorbBuy ? 18.0 : 0.0
+reactionBuyRaw += seqAbsorbBuy ? 10.0 : 0.0
+reactionBuyRaw += microBosBuy ? 14.0 : 0.0
+reactionBuyRaw += sellNoFomo == false and masterDir == -1 ? 8.0 : 0.0
+reactionBuyRaw += lateSellExhaustion or advExhaustSell ? 16.0 : 0.0
+reactionBuyRaw := math.min(100.0, reactionBuyRaw)
+
+reactionSellRaw = 0.0
+reactionSellRaw += approachSellReaction ? 18.0 : 0.0
+reactionSellRaw += nearResist ? 16.0 : 0.0
+reactionSellRaw += resistStrength >= 70 ? 18.0 : resistStrength >= 55 ? 10.0 : 0.0
+reactionSellRaw += upperWick > bodySafe * 0.85 ? 14.0 : 0.0
+reactionSellRaw += sweepUp ? 16.0 : 0.0
+reactionSellRaw += absorbSell ? 18.0 : 0.0
+reactionSellRaw += seqAbsorbSell ? 10.0 : 0.0
+reactionSellRaw += microBosSell ? 14.0 : 0.0
+reactionSellRaw += buyNoFomo == false and masterDir == 1 ? 8.0 : 0.0
+reactionSellRaw += lateBuyExhaustion or advExhaustBuy ? 16.0 : 0.0
+reactionSellRaw := math.min(100.0, reactionSellRaw)
+
+reactionScore = masterDir == -1 ? reactionBuyRaw : masterDir == 1 ? reactionSellRaw : math.max(reactionBuyRaw, reactionSellRaw)
+
+reactionLevel = reactionScore >= 82 ? "REACCIÓN EXTREMA" :
+     reactionScore >= 68 ? "REACCIÓN FUERTE" :
+     reactionScore >= 52 ? "REACCIÓN MEDIA" :
+     reactionScore >= 35 ? "REACCIÓN DÉBIL" :
+     "SIN REACCIÓN CLARA"
+
+reactionDirection = masterDir == -1 ? "BUY CONTRARIA" : masterDir == 1 ? "SELL CONTRARIA" : "SIN DIRECCIÓN"
+
+reactionZoneTxt = masterDir == -1 ? "REACCIÓN BUY: " + str.tostring(reactionBuyFrom, format.mintick) + " → " + str.tostring(reactionBuyTo, format.mintick) :
+     masterDir == 1 ? "REACCIÓN SELL: " + str.tostring(reactionSellFrom, format.mintick) + " → " + str.tostring(reactionSellTo, format.mintick) :
+     "SIN ZONA"
+
+reactionAction = reactionScore >= 82 ? "CIERRE / POSIBLE REVERSA" :
+     reactionScore >= 68 ? "CERRAR PARCIAL / PROTEGER" :
+     reactionScore >= 52 ? "PROTEGER / ESPERAR RECHAZO" :
+     reactionScore >= 35 ? "SOLO RESPIRACIÓN / RUNNER" :
+     "SIN ACCIÓN"
+
+reactionContinuity = reactionScore >= 82 ? "CONTINUIDAD INVALIDÁNDOSE" :
+     reactionScore >= 68 ? "CONTINUIDAD EN RIESGO" :
+     reactionScore >= 52 ? "CONTINUIDAD PAUSADA" :
+     reactionScore >= 35 ? "CONTINUIDAD AÚN VIVA" :
+     "SIN REACCIÓN"
+
+reactionPreAlert = (approachBuyReaction or approachSellReaction) and reactionScore >= 35
+reactionStrongAlert = reactionScore >= 68
+reactionExtremeAlert = reactionScore >= 82
+
+
+
+
+
+
+
+
+madreTxt = conflict ? "MADRE: SIN DIRECCIÓN / ESPERAR" : masterDir == 1 ? "MADRE: BUY VIVO / CONTINUIDAD" : "MADRE: SELL VIVO / CONTINUIDAD"
+trendChangeTxt = changeTrendNow ? (prevMasterDirNotice == 1 ? "CAMBIO: BUY → SELL" : "CAMBIO: SELL → BUY") : "CAMBIO: NO CONFIRMADO"
+strongDirTxt = masterDir == 1 ? "BUY FUERTE" : masterDir == -1 ? "SELL FUERTE" : "FUERTE SIN DIRECCIÓN"
+softDirTxt = masterDir == 1 ? "BUY SUAVE" : masterDir == -1 ? "SELL SUAVE" : "SUAVE SIN DIRECCIÓN"
+continuityTxt = masterDir == 1 ? "CONTINUIDAD BUY / NO ABRIR SELL" : masterDir == -1 ? "CONTINUIDAD SELL / NO ABRIR BUY" : "SIN CONTINUIDAD"
+retroNoContraTxt = masterDir == 1 ? "RETROCESO BUY / NO ABRIR SELL / DEJA CORRER BUY" : masterDir == -1 ? "RETROCESO SELL / NO ABRIR BUY / DEJA CORRER SELL" : "RETROCESO SIN DIRECCIÓN"
+retroClearTxt = falseChangeWatch ? (prevMasterDirNotice == 1 ? "RETROCESO BUY DESDE/HASTA | NO ES CAMBIO | ES FOMO | NO ABRIR SELL | DEJA CORRER BUY" : "RETROCESO SELL DESDE/HASTA | NO ES CAMBIO | ES FOMO | NO ABRIR BUY | DEJA CORRER SELL") : masterDir == 1 ? "RETROCESO BUY: RESPIRACIÓN → POSIBLE CONTINÚA BUY | NO ABRIR SELL" : masterDir == -1 ? "RETROCESO SELL: RESPIRACIÓN → POSIBLE CONTINÚA SELL | NO ABRIR BUY" : "RETROCESO: SIN DIRECCIÓN"
+srClearTxt = masterDir == 1 ? "SOPORTE BUY DEFENDIDO " + str.tostring(supportStrength) + "%" : masterDir == -1 ? "RESISTENCIA SELL DEFENDIDA " + str.tostring(resistStrength) + "%" : "SOP/RES: ESPERAR"
+stateClearTxt = falseChangeWatch ? retroNoContraTxt : closeNow ? "PROTEGER GANANCIA / CERRAR PARCIAL" : buyWaitContinuation ? "BUY VIVO PERO RESISTENCIA FUERTE / NO OPERAR TODAVÍA / ESPERA CONTINUACIÓN" : sellWaitContinuation ? "SELL VIVO PERO SOPORTE FUERTE / NO OPERAR TODAVÍA / ESPERA CONTINUACIÓN" : lateralWait ? "LATERALIZACIÓN / ESPERAR ROMPIMIENTO O RETROCESO" : strongEntry ? ("ENTRA YA " + strongDirTxt + " EN ZONA | " + continuityTxt) : softEntry ? ("ENTRA " + softDirTxt + " / CONFIRMAR | " + continuityTxt) : preNow ? "IMPULSO NACIENDO / ESPERA GATILLO" : retroNow ? retroNoContraTxt : runnerNow ? ("DEJA CORRER | " + continuityTxt) : conflict ? "NO ENTRAR / CONFLICTO" : "OBSERVAR / ESPERAR REACCIÓN"
+
+preventTitle = preventBuyWatch ? "🟦 SOPORTE BUY TOCADO" : preventSellWatch ? "🟧 RESISTENCIA SELL TOCADA" : "OBSERVANDO"
+preventLine = preventBuyWatch ? "ESPERANDO ABSORCIÓN BUY / FLOW BUY" : preventSellWatch ? "ESPERANDO ABSORCIÓN SELL / FLOW SELL" : "-"
+preventZone = preventBuyWatch ? ("SOPORTE BUY: " + str.tostring(chLow, format.mintick) + " | ZONA " + str.tostring(buyZoneFrom, format.mintick) + " → " + str.tostring(buyZoneTo, format.mintick)) : preventSellWatch ? ("RESISTENCIA SELL: " + str.tostring(chHigh, format.mintick) + " | ZONA " + str.tostring(sellZoneFrom, format.mintick) + " → " + str.tostring(sellZoneTo, format.mintick)) : "-"
+preventAction = preventBuyWatch ? "NO ENTRAR AÚN / ESPERA GATILLO BUY" : preventSellWatch ? "NO ENTRAR AÚN / ESPERA GATILLO SELL" : "-"
+
+noticeTitle = changeTrendNow ? "⚠ CAMBIO REAL CONFIRMADO" : falseChangeWatch ? "🟠 RETROCESO / FOMO" : closeNow ? "🔴 CIERRA / PROTEGE" : buyWaitContinuation ? "🟠 BUY VIVO / RESISTENCIA FUERTE" : sellWaitContinuation ? "🟠 SELL VIVO / SOPORTE FUERTE" : lateralWait ? "⚪ LATERALIZACIÓN / ESPERAR" : strongEntry ? (masterDir == 1 ? "🟢 ENTRA YA BUY FUERTE" : "🔴 ENTRA YA SELL FUERTE") : softEntry ? (masterDir == 1 ? "🟡 ENTRA BUY SUAVE" : "🟡 ENTRA SELL SUAVE") : preventNow ? preventTitle : preNow ? (preDirection == 1 ? "🟡 IMPULSO BUY NACIENDO" : "🟡 IMPULSO SELL NACIENDO") : retroNow ? (masterDir == 1 ? "🟠 RETROCESO BUY" : "🟠 RETROCESO SELL") : runnerNow ? (masterDir == 1 ? "🟢 DEJA CORRER BUY" : "🟢 DEJA CORRER SELL") : conflict ? "⚪ ESPERAR" : "🔵 OBSERVAR"
+
+noticeLine1 = madreTxt
+noticeLine2 = changeTrendNow ? trendChangeTxt : falseChangeWatch ? stateClearTxt : closeNow ? stateClearTxt : noSpaceWait ? stateClearTxt : strongEntry ? ("DIRECCIÓN: " + strongDirTxt + " | " + continuityTxt) : softEntry ? ("DIRECCIÓN: " + softDirTxt + " | " + continuityTxt) : preventNow ? preventLine : preNow ? ("PRE-ENTRA " + (preDirection == 1 ? "BUY " : "SELL ") + stars(preScoreShown) + " " + str.tostring(math.round(preScoreShown)) + "% | " + preReasonTxt) : stateClearTxt
+noticeLine3 = lateralWait ? "LATERALIZACIÓN: MERCADO ENCERRADO / ESPERAR SALIDA" : buyWaitContinuation ? "RIESGO DE RECHAZO | BUY SIN ESPACIO OPERATIVO | RES " + str.tostring(resistStrength) + "%" : sellWaitContinuation ? "RIESGO DE REBOTE | SELL SIN ESPACIO OPERATIVO | SOP " + str.tostring(supportStrength) + "%" : preventNow ? preventZone : retroNow or masterDir != 0 ? retroClearTxt + " | " + retroTxt : "ZONA: " + entryTxt
+noticeLine4 = lateralWait ? "NO OPERAR TODAVÍA | ESPERAR ROMPIMIENTO O RETROCESO" : buyWaitContinuation ? "ESPERA ROMPIMIENTO LIMPIO O RETROCESO A ZONA BUY" : sellWaitContinuation ? "ESPERA ROMPIMIENTO LIMPIO O RETROCESO A ZONA SELL" : preventNow ? preventAction : srClearTxt + " | ZONA " + entryTxt
+noticeLine5 = masterDir == 1 ? "SIG. RESISTENCIA SELL: " + nextZoneTxt : masterDir == -1 ? "SIG. SOPORTE BUY: " + nextZoneTxt : "SIGUIENTE ZONA: " + nextZoneTxt
+
+noticeBg = changeTrendNow ? color.new(color.purple, 0) : falseChangeWatch ? color.new(color.yellow, 0) : closeNow ? color.new(color.red, 0) : noSpaceWait ? color.new(color.orange, 0) : strongEntry ? color.new(color.green, 0) : softEntry ? color.new(color.orange, 0) : preventBuyWatch ? color.new(color.blue, 0) : preventSellWatch ? color.new(color.orange, 0) : preNow ? color.new(color.yellow, 0) : retroNow ? color.new(color.yellow, 0) : runnerNow ? color.new(color.teal, 0) : color.new(color.rgb(35,35,35), 0)
+noticeTxt = preNow or retroNow or falseChangeWatch ? color.black : color.white
+importantNow = strongEntry or softEntry or noSpaceWait or preventNow or preNow or closeNow or changeTrendNow or falseChangeWatch or retroNow or runnerNow
+
+if importantNow
+    persistentTitle := noticeTitle
+    persistentLine1 := noticeLine1
+    persistentLine2 := noticeLine2
+    persistentLine3 := noticeLine3
+    persistentLine4 := noticeLine4 + "\n" + noticeLine5
+    persistentBg := noticeBg
+    persistentTxt := noticeTxt
+    persistentBars := 22
+
+if persistentBars > 0
+    persistentBars -= 1
+
+var table aviso = table.new(position.top_center, 1, 6, frame_color=color.new(color.yellow, 15), border_color=color.new(color.white, 30), border_width=1)
+
+if showLiveLabel and barstate.islast
+    table.clear(aviso, 0, 0, 0, 5)
+    avisoTitleCompact = str.replace_all(persistentTitle, " / ", "\n")
+    avisoLine1Compact = str.replace_all(persistentLine1, " | ", "\n")
+    avisoLine2Compact = str.replace_all(persistentLine2, " | ", "\n")
+    avisoLine3Compact = str.replace_all(persistentLine3, " | ", "\n")
+    avisoLine4Compact = str.replace_all(str.replace_all(persistentLine4, " | ", "\n"), " / ", "\n")
+    table.cell(aviso, 0, 0, "IMPULXOR\nAVISO BANCARIO", text_color=color.yellow, bgcolor=color.new(color.black, 0), text_size=size.small)
+    table.cell(aviso, 0, 1, avisoTitleCompact, text_color=persistentTxt, bgcolor=persistentBg, text_size=size.normal)
+    table.cell(aviso, 0, 2, avisoLine1Compact, text_color=color.white, bgcolor=color.new(color.black, 0), text_size=size.small)
+    table.cell(aviso, 0, 3, avisoLine2Compact, text_color=color.white, bgcolor=color.new(color.rgb(22,22,22), 0), text_size=size.small)
+    table.cell(aviso, 0, 4, avisoLine3Compact, text_color=color.yellow, bgcolor=color.new(color.black, 0), text_size=size.small)
+    table.cell(aviso, 0, 5, avisoLine4Compact, text_color=color.aqua, bgcolor=color.new(color.rgb(22,22,22), 0), text_size=size.small)
+
+if barstate.islast and masterDir != 0
+    prevMasterDirNotice := masterDir
+
+
+//━━━━━━━━━━━━━━━━━━
+// IMPULXOR V40 UX DECISION LAYER
+// Agregado visual: NO borra paneles, NO mueve caja original, NO cambia lógica madre.
+// Objetivo: que en scalping sepas rápido: OPERAR / ESPERAR / NO OPERAR.
+//━━━━━━━━━━━━━━━━━━
+showDecisionUX = input.bool(true, "Mostrar UX decisión rápida V40", group="04. VISUAL", display=display.none)
+
+uxEstado = strongEntry ? "OPERABLE" : softEntry ? "OPERABLE SUAVE" : noSpaceWait or closeNow or conflict ? "NO OPERAR" : preNow or preventNow or retroNow ? "PREPARANDO" : runnerNow ? "DEJAR CORRER" : "ESPERAR"
+uxSemaforo = strongEntry ? "🟢" : softEntry ? "🟡" : noSpaceWait or closeNow or conflict ? "🔴" : preNow or preventNow or retroNow ? "🟠" : runnerNow ? "🟢" : "⚪"
+
+uxSenal = strongEntry ? (masterDir == 1 ? "BUY FUERTE EN ZONA" : "SELL FUERTE EN ZONA") : softEntry ? (masterDir == 1 ? "BUY SUAVE / CONFIRMAR" : "SELL SUAVE / CONFIRMAR") : buyWaitContinuation ? "BUY VIVO PERO SIN ESPACIO" : sellWaitContinuation ? "SELL VIVO PERO SIN ESPACIO" : lateralWait ? "LATERAL / NO TOCAR" : closeNow ? "PROTEGER GANANCIA" : preNow ? (preDirection == 1 ? "BUY NACIENDO / ESPERA GATILLO" : "SELL NACIENDO / ESPERA GATILLO") : preventNow ? preventAction : retroNow ? (masterDir == 1 ? "RETROCESO BUY / ESPERAR" : "RETROCESO SELL / ESPERAR") : runnerNow ? (masterDir == 1 ? "BUY CORRIENDO" : "SELL CORRIENDO") : conflict ? "CONFLICTO / ESPERAR" : "ESPERAR REACCIÓN"
+
+uxFase = lateBuyExhaustion or lateSellExhaustion or antiTopBuy or antiBottomSell ? "AGOTAMIENTO / NO PERSEGUIR" : preNow ? "NACIENDO" : strongEntry or softEntry ? "GATILLO ACTIVO" : retroNow ? "RESPIRANDO" : runnerNow ? "CONTINUACIÓN" : lateralWait ? "LATERALIZACIÓN" : "OBSERVACIÓN"
+
+uxRiskTxt = closeNow ? "RIESGO ALTO: PROTEGER" : noSpaceWait ? "RIESGO ALTO: SIN ESPACIO" : strongEntry and validNoFomo ? "RIESGO CONTROLADO" : softEntry ? "RIESGO MEDIO" : conflict ? "RIESGO ALTO: CONFLICTO" : "RIESGO MEDIO / ESPERAR"
+
+uxSpacePct = masterDir == 1 ? math.round(math.min(100.0, freeSpaceBuyAtr / 2.0 * 100.0)) : masterDir == -1 ? math.round(math.min(100.0, freeSpaceSellAtr / 2.0 * 100.0)) : 0
+uxSpaceTxt = noSpaceWait ? "SIN ESPACIO" : str.tostring(uxSpacePct) + "% ESPACIO"
+
+uxConf = math.round(scoreShown)
+uxBar = uxConf >= 90 ? "██████████" : uxConf >= 80 ? "████████░░" : uxConf >= 70 ? "███████░░░" : uxConf >= 60 ? "██████░░░░" : uxConf >= 50 ? "█████░░░░░" : uxConf >= 40 ? "████░░░░░░" : "███░░░░░░░"
+
+uxBg = strongEntry ? color.new(color.green, 0) : softEntry ? color.new(color.orange, 0) : noSpaceWait or closeNow or conflict ? color.new(color.red, 0) : preNow or preventNow or retroNow ? color.new(color.orange, 0) : runnerNow ? color.new(color.teal, 0) : color.new(color.rgb(35,35,35), 0)
+uxTxtColor = color.white
+
+var table uxPanel = table.new(position.top_right, 1, 42, frame_color=color.new(color.yellow, 10), border_color=color.new(color.white, 35), border_width=1)
+
+if showDecisionUX and barstate.islast
+    table.clear(uxPanel, 0, 0, 0, 41)
+
+    uxSenalCompact = str.replace_all(uxSenal, " / ", "\n")
+    uxRiskCompact = str.replace_all(uxRiskTxt, ": ", ":\n")
+    uxExecModeCompact = str.replace_all(executionMode, " / ", "\n")
+    uxExecActionCompact = str.replace_all(executionAction, " / ", "\n")
+    uxSniperModeCompact = str.replace_all(sniperMode, " / ", "\n")
+    uxSniperActionCompact = str.replace_all(sniperAction, " / ", "\n")
+    uxMarketModeCompact = str.replace_all(marketMode, " / ", "\n")
+    uxAdaptiveCompact = str.replace_all(adaptiveAggression, " ", "\n")
+    uxWarningCompact = str.replace_all(memoryWarning, " / ", "\n")
+    uxIaCompact = str.replace_all(iaAdaptativaSintetica, " / ", "\n")
+    uxRetestCompact = str.replace_all(retestState, " / ", "\n")
+    uxV45ActionCompact = str.replace_all(v45Action, " / ", "\n")
+    uxV45ReasonCompact = str.replace_all(v45Reason, " / ", "\n")
+    uxV45ZoneCompact = str.replace_all(v45ZoneTxt, " | ", "\n")
+    uxV45EntryZoneCompact = str.replace_all(v45EntryZoneTxt, " | ", "\n")
+
+    table.cell(uxPanel, 0, 0, "IMPULXOR\nDECISIÓN RÁPIDA V40", text_color=color.yellow, bgcolor=color.new(color.black, 0), text_size=size.normal)
+    table.cell(uxPanel, 0, 1, uxSemaforo + " " + uxEstado, text_color=uxTxtColor, bgcolor=uxBg, text_size=size.large)
+    table.cell(uxPanel, 0, 2, uxSenalCompact, text_color=color.white, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.normal)
+    table.cell(uxPanel, 0, 3, "FASE\n" + uxFase, text_color=color.aqua, bgcolor=color.new(color.black, 0), text_size=size.normal)
+    table.cell(uxPanel, 0, 4, "RIESGO\n" + uxRiskCompact, text_color=str.contains(uxRiskTxt, "ALTO") ? color.red : str.contains(uxRiskTxt, "MEDIO") ? color.orange : color.lime, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.normal)
+    table.cell(uxPanel, 0, 5, "ESPACIO / CONFIANZA\n" + uxSpaceTxt + " | " + str.tostring(uxConf) + "%", text_color=noSpaceWait ? color.red : color.lime, bgcolor=color.new(color.black, 0), text_size=size.normal)
+    table.cell(uxPanel, 0, 6, uxBar, text_color=strongEntry ? color.lime : softEntry ? color.yellow : noSpaceWait or conflict ? color.red : color.aqua, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.small)
+    table.cell(uxPanel, 0, 7, "CONTINUACIÓN REAL\n" + str.tostring(math.round(continuationReal)) + "%", text_color=continuationReal >= 75 ? color.lime : continuationReal >= 55 ? color.yellow : color.orange, bgcolor=color.new(color.black, 0), text_size=size.normal)
+    table.cell(uxPanel, 0, 8, "FASE IMPULSO\n" + timingPhase, text_color=timingPhase == "EXPLOSIÓN" ? color.lime : timingPhase == "AGOTAMIENTO" ? color.red : color.aqua, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.normal)
+    table.cell(uxPanel, 0, 9, "ESPACIO OPERATIVO\n" + str.tostring(spaceOperationalPct) + "%", text_color=spaceOperationalPct <= 35 ? color.red : color.lime, bgcolor=color.new(color.black, 0), text_size=size.normal)
+    table.cell(uxPanel, 0, 10, noTradeEngine ? "⚠ NO OPERAR\nFILTRO ACTIVO" : "✅ OPERACIÓN\nHABILITADA", text_color=noTradeEngine ? color.red : color.lime, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.normal)
+    table.cell(uxPanel, 0, 11, "EJECUCIÓN\n" + uxExecModeCompact, text_color=executionRisk == "ALTO" ? color.red : executionRisk == "CONTROLADO" ? color.lime : color.yellow, bgcolor=color.new(color.black, 0), text_size=size.normal)
+    table.cell(uxPanel, 0, 12, "ACCIÓN EXACTA\n" + uxExecActionCompact, text_color=executionRisk == "ALTO" ? color.red : color.white, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.normal)
+    table.cell(uxPanel, 0, 13, "SCORE EJECUCIÓN\n" + str.tostring(executionScore) + "%", text_color=executionScore >= 75 ? color.lime : executionScore >= 55 ? color.yellow : color.orange, bgcolor=color.new(color.black, 0), text_size=size.normal)
+    table.cell(uxPanel, 0, 14, "RIESGO EJECUCIÓN\n" + executionRisk, text_color=executionRisk == "ALTO" ? color.red : executionRisk == "CONTROLADO" ? color.lime : color.orange, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.normal)
+    table.cell(uxPanel, 0, 15, "SNIPER\n" + uxSniperModeCompact, text_color=sniperShotBuy or sniperShotSell ? color.lime : goneBuy or goneSell or fakeAccelBuy or fakeAccelSell ? color.red : color.yellow, bgcolor=color.new(color.black, 0), text_size=size.small)
+    table.cell(uxPanel, 0, 16, "ACCIÓN SNIPER\n" + uxSniperActionCompact, text_color=sniperShotBuy or sniperShotSell ? color.lime : goneBuy or goneSell ? color.red : color.white, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.small)
+    table.cell(uxPanel, 0, 17, "TIMING SNIPER\n" + str.tostring(sniperTimingScore) + "%", text_color=sniperTimingScore >= 75 ? color.lime : sniperTimingScore >= 55 ? color.yellow : color.orange, bgcolor=color.new(color.black, 0), text_size=size.small)
+    table.cell(uxPanel, 0, 18, sniperShotBuy or sniperShotSell ? "🔥 DISPARO\nLISTO" : goneBuy or goneSell ? "⛔ TARDE\nESPERAR" : "👁 OBSERVAR\nTIMING", text_color=sniperShotBuy or sniperShotSell ? color.lime : goneBuy or goneSell ? color.red : color.aqua, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.small)
+    table.cell(uxPanel, 0, 19, "MEMORIA\n" + uxMarketModeCompact, text_color=dangerDay ? color.red : marketQualityScore >= 60 ? color.lime : color.yellow, bgcolor=color.new(color.black, 0), text_size=size.small)
+    table.cell(uxPanel, 0, 20, "CALIDAD FLOW\n" + str.tostring(marketQualityScore) + "%", text_color=marketQualityScore >= 70 ? color.lime : marketQualityScore >= 45 ? color.yellow : color.red, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.small)
+    table.cell(uxPanel, 0, 21, "TRAMPAS / CONT\n" + str.tostring(trapPct) + "% / " + str.tostring(continuationPct) + "%", text_color=trapPct >= 35 ? color.red : color.aqua, bgcolor=color.new(color.black, 0), text_size=size.small)
+    table.cell(uxPanel, 0, 22, "ADAPTACIÓN\n" + uxAdaptiveCompact, text_color=adaptiveAggression == "DEFENSIVO" ? color.red : adaptiveAggression == "AGRESIVO CONTROLADO" ? color.lime : color.yellow, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.small)
+    table.cell(uxPanel, 0, 23, uxWarningCompact, text_color=dangerDay ? color.red : str.contains(memoryWarning, "FLOW") ? color.lime : color.orange, bgcolor=color.new(color.black, 0), text_size=size.small)
+    table.cell(uxPanel, 0, 24, "IA ADAPTATIVA\n" + uxIaCompact, text_color=adaptivePermission ? color.lime : color.red, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.small)
+    table.cell(uxPanel, 0, 25, "RETEST\n" + uxRetestCompact, text_color=str.contains(retestState, "CONFIRMADO") ? color.lime : str.contains(retestState, "BOS") ? color.yellow : color.orange, bgcolor=color.new(color.black, 0), text_size=size.small)
+    table.cell(uxPanel, 0, 26, "ENTRADA V45\n" + uxV45ActionCompact, text_color=v45EntryBuy or v45EntrySell ? color.lime : v45EntryBlocked ? color.red : color.yellow, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.small)
+    table.cell(uxPanel, 0, 27, "MOTIVO\n" + uxV45ReasonCompact, text_color=v45EntryBuy or v45EntrySell ? color.lime : color.orange, bgcolor=color.new(color.black, 0), text_size=size.small)
+    table.cell(uxPanel, 0, 28, uxV45ZoneCompact, text_color=color.aqua, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.small)
+    table.cell(uxPanel, 0, 29, uxV45EntryZoneCompact, text_color=color.lime, bgcolor=color.new(color.black, 0), text_size=size.small)
+    table.cell(uxPanel, 0, 30, blockBeforeRetest ? "⚠ CONTINUIDAD ≠\nABRIR OPERACIÓN" : v45EntryBuy or v45EntrySell ? "✅ RETEST CONFIRMADO\nOPERABLE" : "👁 ESPERAR RETEST\n+ MINI BOS", text_color=blockBeforeRetest ? color.red : v45EntryBuy or v45EntrySell ? color.lime : color.yellow, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.small)
+    table.cell(uxPanel, 0, 31, "BIAS / SETUP / TRIGGER\n" + biasV48 + " | " + setupV48 + " | " + triggerV48, text_color=triggerBuyV48 ? color.lime : triggerSellV48 ? color.red : color.yellow, bgcolor=color.new(color.black, 0), text_size=size.normal)
+    table.cell(uxPanel, 0, 32, "LIQ EXT / INT\n" + externalLiqTxt + "\n" + internalLiqTxt, text_color=color.aqua, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.small)
+    table.cell(uxPanel, 0, 33, "POI / ORDEN / UBICACIÓN\n" + poiTxt + "\n" + pendingOrderTxt + "\nZONA " + pendingZoneTxt + "\nUBICACIÓN " + str.tostring(math.round(locationQuality)) + "%\n" + institutionalActionTxt, text_color=triggerBuyV48 or triggerSellV48 ? color.lime : setupBuyReady or setupSellReady ? color.yellow : color.white, bgcolor=color.new(color.black, 0), text_size=size.small)
+    table.cell(uxPanel, 0, 34, "ICT ESTRUCTURA\n" + ictStructureTxt + "\n" + ictLiquidityTxt, text_color=ictBullMSS or ictBullChoch ? color.lime : ictBearMSS or ictBearChoch ? color.red : color.yellow, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.small)
+    table.cell(uxPanel, 0, 35, "ICT PD ARRAY / OTE\n" + (masterDir == 1 ? ictPdTxtBuy : masterDir == -1 ? ictPdTxtSell : "SIN DIRECCIÓN") + "\n" + ictOteTxt, text_color=masterDir == 1 and ictBullPdCount >= 1 ? color.lime : masterDir == -1 and ictBearPdCount >= 1 ? color.red : color.aqua, bgcolor=color.new(color.black, 0), text_size=size.small)
+    table.cell(uxPanel, 0, 36, "ICT CALIDAD / SESIÓN\nBUY " + str.tostring(math.round(ictBuyQuality)) + "% | SELL " + str.tostring(math.round(ictSellQuality)) + "%\n" + ictSessionTxt, text_color=math.max(ictBuyQuality, ictSellQuality) >= 70 ? color.lime : math.max(ictBuyQuality, ictSellQuality) >= 50 ? color.yellow : color.orange, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.small)
+    table.cell(uxPanel, 0, 37, "ICT ACCIÓN\n" + ictActionTxt, text_color=ictBuyTrigger ? color.lime : ictSellTrigger ? color.red : color.yellow, bgcolor=color.new(color.black, 0), text_size=size.normal)
+    table.cell(uxPanel, 0, 38, "PREVIOUS DAY\nPDH " + str.tostring(pdh, format.mintick) + " | EQ " + str.tostring(pdEq, format.mintick) + " | PDL " + str.tostring(pdl, format.mintick), text_color=color.aqua, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.small)
+    table.cell(uxPanel, 0, 39, "PD POSICIÓN / RAID\n" + prevDayPosTxt + "\n" + prevDayRaidTxt + " | " + prevDayOteTxt, text_color=pdlRaid ? color.lime : pdhRaid ? color.red : color.yellow, bgcolor=color.new(color.black, 0), text_size=size.small)
+    table.cell(uxPanel, 0, 40, "FRACTAL D1→M5\n" + fractalFlowTxt + "\nBIAS " + fractalBiasTxt, text_color=fractalBuyAligned ? color.lime : fractalSellAligned ? color.red : color.yellow, bgcolor=color.new(color.rgb(20,20,20), 0), text_size=size.small)
+    table.cell(uxPanel, 0, 41, "FRACTAL ACCIÓN\n" + fractalActionTxt + "\nBUY Q " + str.tostring(math.round(fractalBuyQuality)) + "% | SELL Q " + str.tostring(math.round(fractalSellQuality)) + "%", text_color=fractalTriggerBuy ? color.lime : fractalTriggerSell ? color.red : color.yellow, bgcolor=color.new(color.black, 0), text_size=size.normal)
+
+
+// Alertas UX rápidas
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and strongEntry and masterDir == 1, "IMPULXOR V40 UX BUY OPERABLE", "UX V40: BUY FUERTE OPERABLE EN ZONA")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and strongEntry and masterDir == -1, "IMPULXOR V40 UX SELL OPERABLE", "UX V40: SELL FUERTE OPERABLE EN ZONA")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and noSpaceWait, "IMPULXOR V40 UX NO OPERAR SIN ESPACIO", "UX V40: NO OPERAR, SIN ESPACIO OPERATIVO")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and preNow, "IMPULXOR V40 UX PREPARANDO GATILLO", "UX V40: PREPARANDO GATILLO, IMPULSO NACIENDO")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and closeNow, "IMPULXOR V40 UX PROTEGER GANANCIA", "UX V40: PROTEGER GANANCIA / CERRAR PARCIAL")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and retroNow, "IMPULXOR V40 UX RETROCESO ESPERAR", "UX V40: RETROCESO, ESPERAR CONFIRMACIÓN")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and sniperBuy, "IMPULXOR V42 ENTRADA SNIPER BUY", "V42: Entrada sniper BUY activa")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and sniperSell, "IMPULXOR V42 ENTRADA SNIPER SELL", "V42: Entrada sniper SELL activa")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and reEntryBuy, "IMPULXOR V42 REENTRADA BUY", "V42: Reentrada BUY válida en retroceso sano")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and reEntrySell, "IMPULXOR V42 REENTRADA SELL", "V42: Reentrada SELL válida en retroceso sano")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and (lateEntryBuy or lateEntrySell), "IMPULXOR V42 ENTRADA TARDE", "V42: Entrada tarde, no perseguir")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and (rareOpportunityBuy or rareOpportunitySell), "IMPULXOR V42 OPORTUNIDAD ALTA", "V42: Oportunidad alta detectada")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and sniperShotBuy, "IMPULXOR V43 DISPARO BUY", "V43: Disparo sniper BUY listo")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and sniperShotSell, "IMPULXOR V43 DISPARO SELL", "V43: Disparo sniper SELL listo")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and (microRetestBuy or microRetestSell), "IMPULXOR V43 MICRO RETEST", "V43: Micro retest detectado")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and (lastCleanBuy or lastCleanSell), "IMPULXOR V43 ULTIMA LIMPIEZA", "V43: Última limpieza antes de posible entrada")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and (goneBuy or goneSell), "IMPULXOR V43 NO PERSEGUIR", "V43: Ya se fue, no perseguir")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and (fakeAccelBuy or fakeAccelSell), "IMPULXOR V43 ACELERACION FALSA", "V43: Aceleración falsa, riesgo de rechazo")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and dangerDay, "IMPULXOR V44 DIA PELIGROSO", "V44: Día peligroso, bajar riesgo")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and marketQualityScore >= 70, "IMPULXOR V44 FLOW FAVORABLE", "V44: Calidad de flow favorable")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and trapPct >= 38, "IMPULXOR V44 MERCADO TRAMPOSO", "V44: Mercado tramposo, cuidado con falsas rupturas")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and compressionPct >= 42, "IMPULXOR V44 COMPRESION", "V44: Mercado comprimido, esperar explosión")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and touchRetestBuy, "IMPULXOR V45 TOQUE RETEST BUY", "V45: Tocó zona de retest BUY, esperar rechazo")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and touchRetestSell, "IMPULXOR V45 TOQUE RETEST SELL", "V45: Tocó zona de retest SELL, esperar rechazo")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and retestMiniBosBuy, "IMPULXOR V45 RETEST BUY CONFIRMADO", "V45: Retest BUY confirmado con rechazo y mini BOS")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and retestMiniBosSell, "IMPULXOR V45 RETEST SELL CONFIRMADO", "V45: Retest SELL confirmado con rechazo y mini BOS")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and v45EntryBuy, "IMPULXOR V45 ENTRADA BUY CONFIRMADA", "V45: Entrada BUY confirmada por retest + rechazo + mini BOS")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and v45EntrySell, "IMPULXOR V45 ENTRADA SELL CONFIRMADA", "V45: Entrada SELL confirmada por retest + rechazo + mini BOS")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and blockBeforeRetest, "IMPULXOR V45 BLOQUEO ANTES RETEST", "V45: Bloqueada entrada anticipada, continuidad no es entrada")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and (advExhaustBuy or advExhaustSell), "IMPULXOR V45 AGOTAMIENTO AVANZADO", "V45: Agotamiento avanzado detectado")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and reactionPreAlert and masterDir == -1, "IMPULXOR V46 REACCION BUY ANTES DE ZONA", "V46: Reacción BUY contraria detectada antes de tocar zona")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and reactionPreAlert and masterDir == 1, "IMPULXOR V46 REACCION SELL ANTES DE ZONA", "V46: Reacción SELL contraria detectada antes de tocar zona")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and reactionStrongAlert, "IMPULXOR V46 REACCION FUERTE", "V46: Reacción fuerte, cerrar parcial o proteger")
+// LEGACY_ALERT_OFF alertcondition(showDecisionUX and reactionExtremeAlert, "IMPULXOR V46 REACCION EXTREMA", "V46: Reacción extrema, posible reversa o cierre")
+
+
+
+
+
+
+
+//━━━━━━━━━━━━━━━━━━
+// ALERTAS
+//━━━━━━━━━━━━━━━━━━
+// LEGACY_ALERT_OFF alertcondition(strongEntry and masterDir == 1, "IMPULXOR V39.2 ENTRAR BUY FUERTE", "ENTRAR BUY FUERTE EN ZONA")
+// LEGACY_ALERT_OFF alertcondition(strongEntry and masterDir == -1, "IMPULXOR V39.2 ENTRAR SELL FUERTE", "ENTRAR SELL FUERTE EN ZONA")
+// LEGACY_ALERT_OFF alertcondition(softEntry and masterDir == 1, "IMPULXOR V39.2 ENTRAR BUY SUAVE", "ENTRAR BUY SUAVE EN ZONA")
+// LEGACY_ALERT_OFF alertcondition(softEntry and masterDir == -1, "IMPULXOR V39.2 ENTRAR SELL SUAVE", "ENTRAR SELL SUAVE EN ZONA")
+// LEGACY_ALERT_OFF alertcondition(nearResist and masterDir == 1, "IMPULXOR V39.2 PROTEGER BUY", "BUY cerca de resistencia: proteger/cerrar parcial")
+// LEGACY_ALERT_OFF alertcondition(nearSupport and masterDir == -1, "IMPULXOR V39.2 PROTEGER SELL", "SELL cerca de soporte: proteger/cerrar parcial")
+// LEGACY_ALERT_OFF alertcondition(buyPullbackDying, "IMPULXOR V39.2 RETRO BUY TERMINANDO", "Retroceso BUY terminando")
+// LEGACY_ALERT_OFF alertcondition(sellPullbackDying, "IMPULXOR V39.2 RETRO SELL TERMINANDO", "Retroceso SELL terminando")
+// LEGACY_ALERT_OFF alertcondition(preImpulseNow and preDirection == 1, "IMPULXOR V39.2 IMPULSO BUY NACIENDO", "IMPULSO BUY NACIENDO: prepararse, esperar gatillo")
+// LEGACY_ALERT_OFF alertcondition(preImpulseNow and preDirection == -1, "IMPULXOR V39.2 IMPULSO SELL NACIENDO", "IMPULSO SELL NACIENDO: prepararse, esperar gatillo")
+// LEGACY_ALERT_OFF alertcondition(changeTrendNow, "IMPULXOR V39.2 CAMBIO REAL CONFIRMADO", "CAMBIO REAL CONFIRMADO: revisar cierre/protección")
+// LEGACY_ALERT_OFF alertcondition(falseChangeWatch, "IMPULXOR V39.2 SOLO RETROCESO", "SOLO RETROCESO: no cerrar por pánico, esperar confirmación")
+// LEGACY_ALERT_OFF alertcondition(preventBuyWatch, "IMPULXOR V39.2 SOPORTE BUY TOCADO", "SOPORTE BUY TOCADO: esperando absorción/flow/gatillo")
+// LEGACY_ALERT_OFF alertcondition(preventSellWatch, "IMPULXOR V39.2 RESISTENCIA SELL TOCADA", "RESISTENCIA SELL TOCADA: esperando absorción/flow/gatillo")
+// LEGACY_ALERT_OFF alertcondition(buyWaitContinuation, "IMPULXOR V39.2 BUY SIN ESPACIO", "BUY vivo pero resistencia fuerte: no operar todavía, esperar rompimiento o retroceso")
+// LEGACY_ALERT_OFF alertcondition(sellWaitContinuation, "IMPULXOR V39.2 SELL SIN ESPACIO", "SELL vivo pero soporte fuerte: no operar todavía, esperar rompimiento o retroceso")
+// LEGACY_ALERT_OFF alertcondition(lateralWait, "IMPULXOR V39.2 LATERALIZACION ESPERAR", "Lateralización: no operar todavía, esperar rompimiento o retroceso")
+
+// LEGACY_ALERT_OFF alertcondition(smartBuyAllowed, "IMPULXOR V39.2 NACIMIENTO BUY PRO", "NACIMIENTO BUY PRO: compresión/barrida/flow con gatillo vivo")
+// LEGACY_ALERT_OFF alertcondition(smartSellAllowed, "IMPULXOR V39.2 NACIMIENTO SELL PRO", "NACIMIENTO SELL PRO: compresión/barrida/flow con gatillo vivo")
+// LEGACY_ALERT_OFF alertcondition(lateBuyExhaustion or antiTopBuy, "IMPULXOR V39.2 BLOQUEO BUY AGOTADO", "BUY bloqueado: posible techo/agota/no perseguir")
+// LEGACY_ALERT_OFF alertcondition(lateSellExhaustion or antiBottomSell, "IMPULXOR V39.2 BLOQUEO SELL AGOTADO", "SELL bloqueado: posible piso/agota/no perseguir")
+
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// IMPULXOR V47.2 - ALERTAS TELEGRAM BUY/SELL/PRE LIMPIAS
+// NO cambia visual ni lógica. Solo reemplaza las alertas antiguas.
+// Crear alerta en TradingView con: Any alert() function call
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+impV46_dirTxt = masterDir == 1 ? "BUY" : masterDir == -1 ? "SELL" : "WAIT"
+impV46_scoreFinal = masterDir == 1 ? buyScore : masterDir == -1 ? sellScore : math.max(buyScore, sellScore)
+
+impV46_hasEntry = not na(entryLine)
+impV46_hasSL    = not na(slLine)
+impV46_hasTP1   = not na(tp1Line)
+impV46_hasTP2   = not na(tp2Line)
+impV46_hasDir   = masterDir == 1 or masterDir == -1
+
+impV46_validData = impV46_hasEntry and impV46_hasSL and impV46_hasTP1 and impV46_hasTP2 and impV46_hasDir and not conflict
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V47.1 ALERT ENGINE
+// Más sensible para no quedarse mudo en Telegram.
+// NO toca paneles, cajas, colores ni visual.
+// Separa entrada confirmada y pre-alerta operable.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+impV47_buyConfirmed = strongEntry or softEntry or sniperBuy or reEntryBuy or rareOpportunityBuy or v45EntryBuy or triggerBuyV48 or ictBuyTrigger or fractalTriggerBuy
+impV47_sellConfirmed = strongEntry or softEntry or sniperSell or reEntrySell or rareOpportunitySell or v45EntrySell or triggerSellV48 or ictSellTrigger or fractalTriggerSell
+
+impV47_buyEarly = masterDir == 1 and validNoFomo and not closeNow and not lateralWait and scoreShown >= 58 and (preBuyArming or smartBuyAllowed or macroEntryBuy or buyContinuation or absorbBuy or seqAbsorbBuy or pocDefendedBuy) and not lateBuyExhaustion and not antiTopBuy
+impV47_sellEarly = masterDir == -1 and validNoFomo and not closeNow and not lateralWait and scoreShown >= 58 and (preSellArming or smartSellAllowed or macroEntrySell or sellContinuation or absorbSell or seqAbsorbSell or pocDefendedSell) and not lateSellExhaustion and not antiBottomSell
+
+impV47_buyHasSpace = not buyWaitContinuation or microBosBuy or spaceOperationalPct >= 30 or macroEntryBuy
+impV47_sellHasSpace = not sellWaitContinuation or microBosSell or spaceOperationalPct >= 30 or macroEntrySell
+
+impV46_buySignal = impV46_validData and masterDir == 1 and not closeNow and not lateralWait and impV47_buyHasSpace and impV47_buyConfirmed
+impV46_sellSignal = impV46_validData and masterDir == -1 and not closeNow and not lateralWait and impV47_sellHasSpace and impV47_sellConfirmed
+
+impV47_buyPreAlert = impV46_validData and masterDir == 1 and not closeNow and not lateralWait and not impV47_buyConfirmed and impV47_buyEarly
+impV47_sellPreAlert = impV46_validData and masterDir == -1 and not closeNow and not lateralWait and not impV47_sellConfirmed and impV47_sellEarly
+
+impV46_price(_v) =>
+    not na(_v) ? str.tostring(_v, format.mintick) : str.tostring(close, format.mintick)
+
+impV46_clean(_s) =>
+    str.length(_s) > 0 ? _s : "-"
+
+impV46_msg(_side) =>
+    string msg = "{"
+    msg += "\"source\":\"IMPULXOR_V50_1_PREV_DAY_FRACTAL_PRO\","
+    msg += "\"ticker\":\"" + syminfo.ticker + "\","
+    msg += "\"symbol\":\"" + syminfo.tickerid + "\","
+    msg += "\"tf\":\"" + timeframe.period + "\","
+    msg += "\"signal\":\"" + _side + "\","
+    msg += "\"type\":\"" + _side + "\","
+    msg += "\"direction\":\"" + _side + "\","
+    msg += "\"side\":\"" + _side + "\","
+    msg += "\"action\":\"" + _side + "\","
+    msg += "\"order\":\"" + _side + "\","
+    msg += "\"order_type\":\"" + _side + "\","
+    msg += "\"orden\":\"" + _side + "\","
+    msg += "\"event\":\"ENTRY_" + _side + "\","
+    msg += "\"price\":\"" + impV46_price(entryLine) + "\","
+    msg += "\"precio\":\"" + impV46_price(entryLine) + "\","
+    msg += "\"entry\":\"" + impV46_price(entryLine) + "\","
+    msg += "\"entry_price\":\"" + impV46_price(entryLine) + "\","
+    msg += "\"sl\":\"" + impV46_price(slLine) + "\","
+    msg += "\"stoploss\":\"" + impV46_price(slLine) + "\","
+    msg += "\"stop_loss\":\"" + impV46_price(slLine) + "\","
+    msg += "\"tp1\":\"" + impV46_price(tp1Line) + "\","
+    msg += "\"take_profit_1\":\"" + impV46_price(tp1Line) + "\","
+    msg += "\"tp2\":\"" + impV46_price(tp2Line) + "\","
+    msg += "\"take_profit_2\":\"" + impV46_price(tp2Line) + "\","
+    msg += "\"score\":\"" + str.tostring(math.round(impV46_scoreFinal)) + "\","
+    msg += "\"buy_score\":\"" + str.tostring(math.round(buyScore)) + "\","
+    msg += "\"sell_score\":\"" + str.tostring(math.round(sellScore)) + "\","
+    msg += "\"entry_zone\":\"" + impV46_clean(entryTxt) + "\","
+    msg += "\"retro_zone\":\"" + impV46_clean(retroTxt) + "\","
+    msg += "\"accion\":\"" + impV46_clean(accionTxt) + "\","
+    msg += "\"fase\":\"" + impV46_clean(faseTxt) + "\","
+    msg += "\"modo\":\"" + impV46_clean(modoTxt) + "\","
+    msg += "\"bias\":\"" + impV46_clean(biasV48) + "\","
+    msg += "\"setup\":\"" + impV46_clean(setupV48) + "\","
+    msg += "\"trigger\":\"" + impV46_clean(triggerV48) + "\","
+    msg += "\"poi\":\"" + impV46_clean(poiTxt) + "\","
+    msg += "\"pending_order\":\"" + impV46_clean(pendingOrderTxt) + "\","
+    msg += "\"location_quality\":\"" + str.tostring(math.round(locationQuality)) + "\","
+    msg += "\"ict_structure\":\"" + impV46_clean(ictStructureTxt) + "\","
+    msg += "\"ict_liquidity\":\"" + impV46_clean(ictLiquidityTxt) + "\","
+    msg += "\"ict_ote\":\"" + impV46_clean(ictOteTxt) + "\","
+    msg += "\"ict_session\":\"" + impV46_clean(ictSessionTxt) + "\","
+    msg += "\"ict_buy_quality\":\"" + str.tostring(math.round(ictBuyQuality)) + "\","
+    msg += "\"ict_sell_quality\":\"" + str.tostring(math.round(ictSellQuality)) + "\","
+    msg += "\"ict_action\":\"" + impV46_clean(ictActionTxt) + "\","
+    msg += "\"prev_day_position\":\"" + impV46_clean(prevDayPosTxt) + "\","
+    msg += "\"prev_day_raid\":\"" + impV46_clean(prevDayRaidTxt) + "\","
+    msg += "\"fractal_bias\":\"" + impV46_clean(fractalBiasTxt) + "\","
+    msg += "\"fractal_action\":\"" + impV46_clean(fractalActionTxt) + "\","
+    msg += "\"fractal_buy_quality\":\"" + str.tostring(math.round(fractalBuyQuality)) + "\","
+    msg += "\"fractal_sell_quality\":\"" + str.tostring(math.round(fractalSellQuality)) + "\","
+    msg += "\"risk\":\"" + impV46_clean(executionRisk) + "\""
+    msg += "}"
+    msg
+
+impV47_preMsg(_side) =>
+    string msg = "{"
+    msg += "\"source\":\"IMPULXOR_V50_1_PREV_DAY_FRACTAL_PRO\","
+    msg += "\"ticker\":\"" + syminfo.ticker + "\","
+    msg += "\"symbol\":\"" + syminfo.tickerid + "\","
+    msg += "\"tf\":\"" + timeframe.period + "\","
+    msg += "\"signal\":\"PRE_" + _side + "\","
+    msg += "\"event\":\"PRE_ALERT_" + _side + "\","
+    msg += "\"price\":\"" + str.tostring(close, format.mintick) + "\","
+    msg += "\"entry_zone\":\"" + impV46_clean(entryTxt) + "\","
+    msg += "\"retro_zone\":\"" + impV46_clean(retroTxt) + "\","
+    msg += "\"score\":\"" + str.tostring(math.round(impV46_scoreFinal)) + "\","
+    msg += "\"buy_score\":\"" + str.tostring(math.round(buyScore)) + "\","
+    msg += "\"sell_score\":\"" + str.tostring(math.round(sellScore)) + "\","
+    msg += "\"fase\":\"" + impV46_clean(faseTxt) + "\","
+    msg += "\"accion\":\"PRE ALERTA: ESPERAR GATILLO / CONFIRMACION\""
+    msg += "}"
+    msg
+
+// ALERTAS DINÁMICAS PARA USAR EN TRADINGVIEW:
+// Condición: IMPULXOR V47.2 -> Cualquier llamada a la función alert()
+if impV46_buySignal and not impV46_buySignal[1]
+    alert(impV46_msg("BUY"), alert.freq_once_per_bar_close)
+
+if impV46_sellSignal and not impV46_sellSignal[1]
+    alert(impV46_msg("SELL"), alert.freq_once_per_bar_close)
+
+if impV47_buyPreAlert and not impV47_buyPreAlert[1]
+    alert(impV47_preMsg("BUY"), alert.freq_once_per_bar_close)
+
+if impV47_sellPreAlert and not impV47_sellPreAlert[1]
+    alert(impV47_preMsg("SELL"), alert.freq_once_per_bar_close)
+
+impV47_anyTelegramAlert = impV46_buySignal or impV46_sellSignal or impV47_buyPreAlert or impV47_sellPreAlert
+
+alertcondition(impV46_buySignal, title="IMPULXOR V50 BUY VALIDADO", message="BUY IMPULXOR VALIDADO")
+alertcondition(impV46_sellSignal, title="IMPULXOR V50 SELL VALIDADO", message="SELL IMPULXOR VALIDADO")
+alertcondition(impV47_buyPreAlert, title="IMPULXOR V50 PRE ALERTA BUY", message="PRE ALERTA BUY IMPULXOR: esperando gatillo/confirmacion")
+alertcondition(impV47_sellPreAlert, title="IMPULXOR V50 PRE ALERTA SELL", message="PRE ALERTA SELL IMPULXOR: esperando gatillo/confirmacion")
+alertcondition(impV47_anyTelegramAlert, title="IMPULXOR V50 TODAS LAS ALERTAS", message="IMPULXOR V50 ALERTA BUY/SELL/PRE")
