@@ -124,7 +124,12 @@ tradeMaxBarsV75      = input.int(80, "Velas máximas de una posición viva", min
 poiMinPrepareV75     = input.int(50, "Calidad POI mínima para PREPARAR", minval=30, maxval=90, group=grpV75, display=display.none)
 poiMinEnterV75       = input.int(58, "Calidad POI mínima para ENTRAR", minval=40, maxval=95, group=grpV75, display=display.none)
 showLivePointsV75    = input.bool(true, "POINTS vivos: reacción en POI", group=grpV75, display=display.none)
-showEntryTagsV75     = input.bool(true, "BUY / SELL sobre la vela de entrada", group=grpV75, display=display.none)
+showEntryTagsV75     = input.bool(true, "ENTRAR BUY / SELL sobre la vela de entrada", group=grpV75, display=display.none)
+pointMinQualityV75   = input.int(45, "Calidad POI mínima para pintar un POINT", minval=20, maxval=90, group=grpV75, display=display.none)
+pointsPerZoneV75     = input.int(3, "Máx. POINTS por zona", minval=1, maxval=10, group=grpV75, display=display.none)
+maxPointsV75         = input.int(60, "Máx. POINTS en pantalla", minval=10, maxval=200, group=grpV75, display=display.none)
+pointBuyCssV75       = input.color(color.rgb(8, 224, 244), "Color POINT / zona BUY", group=grpV75, display=display.none)
+pointSellCssV75      = input.color(color.rgb(246, 9, 104), "Color POINT / zona SELL", group=grpV75, display=display.none)
 liveScoreEnterV75    = input.int(60, "Score vivo mínimo para ENTRAR", minval=40, maxval=95, group=grpV75, display=display.none)
 
 //━━━━━━━━━━━━━━━━━━
@@ -1671,17 +1676,15 @@ uxColorV75 = stateCodeV73 == 31 ? v63Green : stateCodeV73 == 32 ? v63Red : state
 //━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 liveConfidenceV75 = stateCodeV73 == 31 or stateCodeV73 == 32 or stateCodeV73 == 21 or stateCodeV73 == 22 ? stateScoreV73 : math.max(marketBiasStrengthV75, math.max(poiBuyQualityV74, poiSellQualityV74))
 
-pointBuyRawV75 = poiBuyTouchV74 and (buyRejectV73 or absorbBuy or seqAbsorbBuy or sweepDown or ictSslRaid) and poiBuyQualityV74 >= 48
-pointSellRawV75 = poiSellTouchV74 and (sellRejectV73 or absorbSell or seqAbsorbSell or sweepUp or ictBslRaid) and poiSellQualityV74 >= 48
+pointBuyRawV75 = (poiBuyTouchV74 or buyApproachV73) and (buyRejectV73 or absorbBuy or seqAbsorbBuy or sweepDown or ictSslRaid or pocDefendedBuy) and poiBuyQualityV74 >= pointMinQualityV75
+pointSellRawV75 = (poiSellTouchV74 or sellApproachV73) and (sellRejectV73 or absorbSell or seqAbsorbSell or sweepUp or ictBslRaid or pocDefendedSell) and poiSellQualityV74 >= pointMinQualityV75
 pointBuyV75 = pointBuyRawV75 and not (pointSellRawV75 and poiSellQualityV74 >= poiBuyQualityV74)
 pointSellV75 = pointSellRawV75 and not (pointBuyRawV75 and poiBuyQualityV74 > poiSellQualityV74)
-pointBuyColorV75 = poiBuyQualityV74 >= 78 ? color.lime : color.new(color.lime, 28)
-pointSellColorV75 = poiSellQualityV74 >= 78 ? color.red : color.new(color.red, 28)
+pointBuyColorV75 = poiBuyQualityV74 >= 78 ? color.new(pointBuyCssV75, 0) : color.new(pointBuyCssV75, 22)
+pointSellColorV75 = poiSellQualityV74 >= 78 ? color.new(pointSellCssV75, 0) : color.new(pointSellCssV75, 22)
 
-plotshape(showLivePointsV75 and pointBuyV75, title="IMPULXOR POINT BUY", style=shape.circle, location=location.belowbar, color=pointBuyColorV75, size=size.tiny)
-plotshape(showLivePointsV75 and pointSellV75, title="IMPULXOR POINT SELL", style=shape.circle, location=location.abovebar, color=pointSellColorV75, size=size.tiny)
-plotshape(showEntryTagsV75 and enterBuyNowV73, title="IMPULXOR BUY", text="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), textcolor=color.black, size=size.small)
-plotshape(showEntryTagsV75 and enterSellNowV73, title="IMPULXOR SELL", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.small)
+plotshape(showEntryTagsV75 and enterBuyNowV73, title="IMPULXOR ENTRAR BUY", text="ENTRAR\nBUY", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), textcolor=color.black, size=size.normal)
+plotshape(showEntryTagsV75 and enterSellNowV73, title="IMPULXOR ENTRAR SELL", text="ENTRAR\nSELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.normal)
 
 //━━━━━━━━━━━━━━━━━━
 // OBJETOS: ENTRY/SL/TP + CAJAS RIESGO/BENEFICIO + TP ✓ + SL PROTEGIDO (obedecen al PLAN FINAL)
@@ -2118,21 +2121,25 @@ candidateSupplyHighV68 = poiSellHiV74
 var float liveDemandLowV68 = na
 var float liveDemandHighV68 = na
 var float liveDemandStrengthV68 = na
+var float liveDemandVolV68 = na
 var int liveDemandBirthV68 = na
 var float liveSupplyLowV68 = na
 var float liveSupplyHighV68 = na
 var float liveSupplyStrengthV68 = na
+var float liveSupplyVolV68 = na
 var int liveSupplyBirthV68 = na
 
 if newDemandPoiV68
     liveDemandLowV68 := candidateDemandLowV68
     liveDemandHighV68 := candidateDemandHighV68
     liveDemandStrengthV68 := poiBuyQualityV74
+    liveDemandVolV68 := bullObValidV74 ? bullObVolV74 : na
     liveDemandBirthV68 := bar_index
 if newSupplyPoiV68
     liveSupplyLowV68 := candidateSupplyLowV68
     liveSupplyHighV68 := candidateSupplyHighV68
     liveSupplyStrengthV68 := poiSellQualityV74
+    liveSupplyVolV68 := bearObValidV74 ? bearObVolV74 : na
     liveSupplyBirthV68 := bar_index
 
 // V73: la zona se borra si se invalida o si envejece más de poiMaxAgeBars.
@@ -2142,11 +2149,13 @@ if demandInvalidV68
     liveDemandLowV68 := na
     liveDemandHighV68 := na
     liveDemandStrengthV68 := na
+    liveDemandVolV68 := na
     liveDemandBirthV68 := na
 if supplyInvalidV68
     liveSupplyLowV68 := na
     liveSupplyHighV68 := na
     liveSupplyStrengthV68 := na
+    liveSupplyVolV68 := na
     liveSupplyBirthV68 := na
 
 reactionLowV68 = masterDir == 1 ? math.min(buyPullFrom, buyPullTo) : masterDir == -1 ? math.min(sellPullFrom, sellPullTo) : math.min(ema9, ema21)
@@ -2184,6 +2193,8 @@ var box supplyBoxV68 = na
 var box reactionBoxV68 = na
 var label demandTagV68 = na
 var label supplyTagV68 = na
+var line demandMidV68 = na
+var line supplyMidV68 = na
 var label reactionTagV68 = na
 var line supportLineV68 = na
 var line resistanceLineV68 = na
@@ -2200,6 +2211,8 @@ if barstate.islast
     box.delete(reactionBoxV68)
     label.delete(demandTagV68)
     label.delete(supplyTagV68)
+    line.delete(demandMidV68)
+    line.delete(supplyMidV68)
     label.delete(reactionTagV68)
     line.delete(supportLineV68)
     line.delete(resistanceLineV68)
@@ -2214,13 +2227,15 @@ if barstate.islast
 
     if showLivePoiV68 and not na(liveDemandLowV68) and not na(liveDemandHighV68)
         demandLeftV68 = math.max(0, nz(liveDemandBirthV68, bar_index) - 4)
-        demandBoxV68 := box.new(demandLeftV68, liveDemandHighV68, zoneRightV68, liveDemandLowV68, xloc=xloc.bar_index, bgcolor=color.new(color.lime, 86), border_color=color.new(color.lime, 0), border_width=3)
-        demandTagV68 := label.new(zoneRightV68, liveDemandHighV68, "DEMANDA FUERTE · POI\n" + f_range(liveDemandLowV68, liveDemandHighV68) + "\nFUERZA " + str.tostring(math.round(nz(liveDemandStrengthV68, 0))) + "%", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.lime, 0), textcolor=color.black, size=size.normal)
+        demandBoxV68 := box.new(demandLeftV68, liveDemandHighV68, zoneRightV68, liveDemandLowV68, xloc=xloc.bar_index, bgcolor=color.new(pointBuyCssV75, 84), border_color=color.new(pointBuyCssV75, 0), border_width=2)
+        demandMidV68 := line.new(demandLeftV68, (liveDemandHighV68 + liveDemandLowV68) * 0.5, zoneRightV68, (liveDemandHighV68 + liveDemandLowV68) * 0.5, xloc=xloc.bar_index, color=color.new(pointBuyCssV75, 40), width=1, style=line.style_dotted)
+        demandTagV68 := label.new(zoneRightV68, liveDemandHighV68, "BUY ZONE · DEMANDA " + poiBuyTypeV74 + "\n" + f_range(liveDemandLowV68, liveDemandHighV68) + "\nFUERZA " + str.tostring(math.round(nz(liveDemandStrengthV68, 0))) + "%" + (na(liveDemandVolV68) ? "" : " · VOL x" + str.tostring(liveDemandVolV68, "#.0")), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(pointBuyCssV75, 0), textcolor=color.black, size=size.normal)
 
     if showLivePoiV68 and not na(liveSupplyLowV68) and not na(liveSupplyHighV68)
         supplyLeftV68 = math.max(0, nz(liveSupplyBirthV68, bar_index) - 4)
-        supplyBoxV68 := box.new(supplyLeftV68, liveSupplyHighV68, zoneRightV68, liveSupplyLowV68, xloc=xloc.bar_index, bgcolor=color.new(color.red, 86), border_color=color.new(color.red, 0), border_width=3)
-        supplyTagV68 := label.new(zoneRightV68, liveSupplyLowV68, "OFERTA FUERTE · POI\n" + f_range(liveSupplyLowV68, liveSupplyHighV68) + "\nFUERZA " + str.tostring(math.round(nz(liveSupplyStrengthV68, 0))) + "%", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.red, 0), textcolor=color.white, size=size.normal)
+        supplyBoxV68 := box.new(supplyLeftV68, liveSupplyHighV68, zoneRightV68, liveSupplyLowV68, xloc=xloc.bar_index, bgcolor=color.new(pointSellCssV75, 84), border_color=color.new(pointSellCssV75, 0), border_width=2)
+        supplyMidV68 := line.new(supplyLeftV68, (liveSupplyHighV68 + liveSupplyLowV68) * 0.5, zoneRightV68, (liveSupplyHighV68 + liveSupplyLowV68) * 0.5, xloc=xloc.bar_index, color=color.new(pointSellCssV75, 40), width=1, style=line.style_dotted)
+        supplyTagV68 := label.new(zoneRightV68, liveSupplyLowV68, "SELL ZONE · OFERTA " + poiSellTypeV74 + "\n" + f_range(liveSupplyLowV68, liveSupplyHighV68) + "\nFUERZA " + str.tostring(math.round(nz(liveSupplyStrengthV68, 0))) + "%" + (na(liveSupplyVolV68) ? "" : " · VOL x" + str.tostring(liveSupplyVolV68, "#.0")), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(pointSellCssV75, 0), textcolor=color.white, size=size.normal)
 
     if showReactionV68 and masterDir != 0
         reactionColorV68 = masterDir == 1 ? color.aqua : color.orange
@@ -2263,6 +2278,34 @@ f_pushLineV75(_arr, _ln, _cap) =>
     array.push(_arr, _ln)
     if array.size(_arr) > _cap
         line.delete(array.shift(_arr))
+
+// ── POINTS visibles (estilo referencia): etiqueta BUY/SELL pegada a la vela del toque, permanece en el gráfico.
+// Se crea en el primer toque con reacción; máximo N por zona y M en pantalla. NO es una orden: la entrada la decide el motor.
+pointBuyIdV75 = bullObValidV74 ? bullObBirthV74 : bullFvgValidV74 ? bullFvgBar : -1
+pointSellIdV75 = bearObValidV74 ? bearObBirthV74 : bearFvgValidV74 ? bearFvgBar : -1
+var int pointBuyLastIdV75 = -2
+var int pointBuyCountV75 = 0
+var int pointSellLastIdV75 = -2
+var int pointSellCountV75 = 0
+var label[] pointLabelsV75 = array.new_label()
+pointBuyNewV75 = pointBuyV75 and not pointBuyV75[1]
+pointSellNewV75 = pointSellV75 and not pointSellV75[1]
+if pointBuyNewV75
+    if pointBuyIdV75 != pointBuyLastIdV75
+        pointBuyLastIdV75 := pointBuyIdV75
+        pointBuyCountV75 := 0
+    if pointBuyCountV75 < pointsPerZoneV75
+        pointBuyCountV75 += 1
+        if showLivePointsV75
+            f_pushLabelV75(pointLabelsV75, label.new(bar_index, low, "POINT BUY " + str.tostring(math.round(poiBuyQualityV74)) + "%", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=pointBuyColorV75, textcolor=color.white, size=size.small), maxPointsV75)
+if pointSellNewV75
+    if pointSellIdV75 != pointSellLastIdV75
+        pointSellLastIdV75 := pointSellIdV75
+        pointSellCountV75 := 0
+    if pointSellCountV75 < pointsPerZoneV75
+        pointSellCountV75 += 1
+        if showLivePointsV75
+            f_pushLabelV75(pointLabelsV75, label.new(bar_index, high, "POINT SELL " + str.tostring(math.round(poiSellQualityV74)) + "%", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=pointSellColorV75, textcolor=color.white, size=size.small), maxPointsV75)
 
 // ── Estructura SWING
 swHV75 = ta.pivothigh(high, swingLenV75, swingLenV75)

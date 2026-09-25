@@ -76,3 +76,14 @@ el SL dibujado coincida con el del panel y la alerta.
   motor cuando hay preparar/entrar; si no, el mayor entre sesgo MTF y calidad POI).
 - Zonas SELL/BUY del panel izquierdo muestran el POI real con su tipo.
 - EMAs ocultas por defecto (input), aviso vivo legacy y EXP legacy apagados.
+
+## V75.2 — POINTS visibles y cajas BUY / SELL (solo capa visual)
+
+- POINT BUY / POINT SELL como etiqueta pegada a la vela del toque con reacción,
+  en cian y rosa como la referencia, con el % de calidad del POI. Permanecen en el
+  gráfico (máx. 3 por zona, 60 en pantalla, inputs). Umbral de calidad 45 (input).
+- La vela de entrada del motor lleva "ENTRAR BUY" / "ENTRAR SELL" en verde/rojo,
+  distinta del POINT para no confundir reacción con orden.
+- Las cajas POI ahora dicen "BUY ZONE · DEMANDA OB/FVG" y "SELL ZONE · OFERTA ...",
+  con línea media punteada, fuerza y volumen relativo del OB. Colores editables.
+- Motor, paneles y alertas sin cambios.
