@@ -54,7 +54,8 @@ nearAtr    = input.float(0.35, "Aviso soporte/resistencia cerca", step=0.05, gro
 grpVisual = "04. VISUAL"
 showMapBox    = input.bool(false, "Mostrar caja mapa", group=grpVisual, display=display.none)
 showTPLevels  = input.bool(true, "Mostrar líneas Entry/SL/TP", group=grpVisual, display=display.none)
-showLiveLabel = input.bool(true, "Mostrar aviso vivo", group=grpVisual, display=display.none)
+showLiveLabel = input.bool(false, "Mostrar aviso vivo (legacy)", group=grpVisual, display=display.none)
+showEmasV75   = input.bool(false, "Mostrar EMAs 9/21/50/200", group=grpVisual, display=display.none)
 showImageDashboard = input.bool(true, "Dashboard estilo imagen", group=grpVisual, display=display.none)
 showHeatMapV63     = input.bool(false, "Mapa de calor / liquidez", group=grpVisual, display=display.none)
 heatLookbackV63    = input.int(80, "Heatmap lookback", minval=30, maxval=200, group=grpVisual, display=display.none)
@@ -69,7 +70,7 @@ showLivePoiV68       = input.bool(true, "POI oferta/demanda fuertes", group=grpV
 showReactionV68      = input.bool(false, "Zona de reacción viva", group=grpVisual, display=display.none)
 showStrongSRV68      = input.bool(true, "Soporte/resistencia fuerte", group=grpVisual, display=display.none)
 showLastAbsV68       = input.bool(false, "Última absorción", group=grpVisual, display=display.none)
-showLastExpV68       = input.bool(true, "Última vela explosiva", group=grpVisual, display=display.none)
+showLastExpV68       = input.bool(false, "Última vela explosiva (legacy)", group=grpVisual, display=display.none)
 showWatermarkV68     = input.bool(true, "Marca de agua IMPULXOR", group=grpVisual, display=display.none)
 eventVisibleBarsV68  = input.int(4, "Duración marcador reciente", minval=1, maxval=12, group=grpVisual, display=display.none)
 poiMaxAgeBars        = input.int(300, "Caducidad POI dibujado (velas)", minval=20, maxval=2000, group=grpVisual, display=display.none)
@@ -122,6 +123,8 @@ entryWindowBarsV75   = input.int(3, "Velas que dura ENTRAR YA", minval=1, maxval
 tradeMaxBarsV75      = input.int(80, "Velas máximas de una posición viva", minval=10, maxval=500, group=grpV75, display=display.none)
 poiMinPrepareV75     = input.int(50, "Calidad POI mínima para PREPARAR", minval=30, maxval=90, group=grpV75, display=display.none)
 poiMinEnterV75       = input.int(58, "Calidad POI mínima para ENTRAR", minval=40, maxval=95, group=grpV75, display=display.none)
+showLivePointsV75    = input.bool(true, "POINTS vivos: reacción en POI", group=grpV75, display=display.none)
+showEntryTagsV75     = input.bool(true, "BUY / SELL sobre la vela de entrada", group=grpV75, display=display.none)
 liveScoreEnterV75    = input.int(60, "Score vivo mínimo para ENTRAR", minval=40, maxval=95, group=grpV75, display=display.none)
 
 //━━━━━━━━━━━━━━━━━━
@@ -181,6 +184,14 @@ tfDirTxt(d) => d == 1 ? "BUY" : d == -1 ? "SELL" : "NEUTRO"
 
 mtfBuy  = (d1 == 1 ? 6 : 0) + (d5 == 1 ? 16 : 0) + (d15 == 1 ? 18 : 0) + (d30 == 1 ? 10 : 0) + (d45 == 1 ? 8 : 0) + (d60 == 1 ? 10 : 0) + (d120 == 1 ? 8 : 0) + (d180 == 1 ? 8 : 0) + (d240 == 1 ? 8 : 0) + (dD == 1 ? 8 : 0)
 mtfSell = (d1 == -1 ? 6 : 0) + (d5 == -1 ? 16 : 0) + (d15 == -1 ? 18 : 0) + (d30 == -1 ? 10 : 0) + (d45 == -1 ? 8 : 0) + (d60 == -1 ? 10 : 0) + (d120 == -1 ? 8 : 0) + (d180 == -1 ? 8 : 0) + (d240 == -1 ? 8 : 0) + (dD == -1 ? 8 : 0)
+
+// V75 — SESGO GENERAL VIVO (voto MTF ponderado). Informa el panel; NO activa entradas por sí solo.
+mtfTotalWeightV75 = 110.0
+mtfGapV75 = mtfBuy - mtfSell
+marketBiasDirV75 = mtfGapV75 >= 14 ? 1 : mtfGapV75 <= -14 ? -1 : (d60 == 1 and d180 == 1 and d240 != -1) ? 1 : (d60 == -1 and d180 == -1 and d240 != 1) ? -1 : 0
+marketBiasStrengthV75 = math.round(math.min(100.0, math.max(mtfBuy, mtfSell) / mtfTotalWeightV75 * 100.0))
+marketBiasTxtV75 = marketBiasDirV75 == 1 ? "ALCISTA" : marketBiasDirV75 == -1 ? "BAJISTA" : "NEUTRO"
+marketBiasSideV75 = marketBiasDirV75 == 1 ? "BUY CONTEXTO" : marketBiasDirV75 == -1 ? "SELL CONTEXTO" : "NEUTRO"
 
 //━━━━━━━━━━━━━━━━━━
 // LIQUIDEZ / ZONAS
@@ -1049,10 +1060,10 @@ manageTxtV61 = eventBlockV61 ? "PROTEGER / NO NUEVA ENTRADA" : protectPartialV61
 //━━━━━━━━━━━━━━━━━━
 // PLOTS
 //━━━━━━━━━━━━━━━━━━
-plot(ema9, "EMA 9", color=color.new(color.aqua, 0), linewidth=2, display=display.pane)
-plot(ema21, "EMA 21", color=color.new(color.orange, 0), linewidth=2, display=display.pane)
-plot(ema50, "EMA 50", color=color.new(color.fuchsia, 0), linewidth=2, display=display.pane)
-plot(ema200, "EMA 200", color=color.new(color.white, 35), linewidth=2, display=display.pane)
+plot(showEmasV75 ? ema9 : na, "EMA 9", color=color.new(color.aqua, 0), linewidth=2, display=display.pane)
+plot(showEmasV75 ? ema21 : na, "EMA 21", color=color.new(color.orange, 0), linewidth=2, display=display.pane)
+plot(showEmasV75 ? ema50 : na, "EMA 50", color=color.new(color.fuchsia, 0), linewidth=2, display=display.pane)
+plot(showEmasV75 ? ema200 : na, "EMA 200", color=color.new(color.white, 35), linewidth=2, display=display.pane)
 plot(showPrevDayMap ? pdh : na, "PDH", color=color.new(color.red, 20), linewidth=1, style=plot.style_linebr)
 plot(showPrevDayMap ? pdEq : na, "PD EQ 50%", color=color.new(color.white, 35), linewidth=1, style=plot.style_linebr)
 plot(showPrevDayMap ? pdl : na, "PDL", color=color.new(color.lime, 20), linewidth=1, style=plot.style_linebr)
@@ -1653,6 +1664,25 @@ uxSpacePct = stateDirV73 == 1 ? math.round(math.min(100.0, buySpaceAtrV73 / 2.0 
 uxSpaceTxt = stateDirV73 == 0 ? "SIN DIRECCIÓN" : str.tostring(uxSpacePct) + "% ESPACIO"
 uxColorV75 = stateCodeV73 == 31 ? v63Green : stateCodeV73 == 32 ? v63Red : stateCodeV73 == 21 or stateCodeV73 == 22 ? v63Amber : stateCodeV73 == 0 or stateCodeV73 == 10 ? v63Red : v63Cyan
 
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V75 — POINTS VIVOS + ETIQUETAS DE ENTRADA
+// Un POINT es reacción/confluencia en POI, NO una orden por sí solo.
+// BUY/SELL solo se pinta en la vela donde el estado unificado abre la posición.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+liveConfidenceV75 = stateCodeV73 == 31 or stateCodeV73 == 32 or stateCodeV73 == 21 or stateCodeV73 == 22 ? stateScoreV73 : math.max(marketBiasStrengthV75, math.max(poiBuyQualityV74, poiSellQualityV74))
+
+pointBuyRawV75 = poiBuyTouchV74 and (buyRejectV73 or absorbBuy or seqAbsorbBuy or sweepDown or ictSslRaid) and poiBuyQualityV74 >= 48
+pointSellRawV75 = poiSellTouchV74 and (sellRejectV73 or absorbSell or seqAbsorbSell or sweepUp or ictBslRaid) and poiSellQualityV74 >= 48
+pointBuyV75 = pointBuyRawV75 and not (pointSellRawV75 and poiSellQualityV74 >= poiBuyQualityV74)
+pointSellV75 = pointSellRawV75 and not (pointBuyRawV75 and poiBuyQualityV74 > poiSellQualityV74)
+pointBuyColorV75 = poiBuyQualityV74 >= 78 ? color.lime : color.new(color.lime, 28)
+pointSellColorV75 = poiSellQualityV74 >= 78 ? color.red : color.new(color.red, 28)
+
+plotshape(showLivePointsV75 and pointBuyV75, title="IMPULXOR POINT BUY", style=shape.circle, location=location.belowbar, color=pointBuyColorV75, size=size.tiny)
+plotshape(showLivePointsV75 and pointSellV75, title="IMPULXOR POINT SELL", style=shape.circle, location=location.abovebar, color=pointSellColorV75, size=size.tiny)
+plotshape(showEntryTagsV75 and enterBuyNowV73, title="IMPULXOR BUY", text="BUY", style=shape.labelup, location=location.belowbar, color=color.new(color.lime, 0), textcolor=color.black, size=size.small)
+plotshape(showEntryTagsV75 and enterSellNowV73, title="IMPULXOR SELL", text="SELL", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.small)
+
 //━━━━━━━━━━━━━━━━━━
 // OBJETOS: ENTRY/SL/TP + CAJAS RIESGO/BENEFICIO + TP ✓ + SL PROTEGIDO (obedecen al PLAN FINAL)
 //━━━━━━━━━━━━━━━━━━
@@ -1795,9 +1825,9 @@ f_tfRow(_row, _name, _d, _rr, _bg) =>
 f_drawAnalysisV67() =>
     table.clear(analysisV67, 0, 0, 1, 23)
 
-    modeLeft = lateralWait ? "LATERAL" : macroContextDirV72 == 1 ? "ALCISTA" : macroContextDirV72 == -1 ? "BAJISTA" : "NEUTRO"
-    modeColor = lateralWait ? v65Blue : macroContextDirV72 == 1 ? v63Green : macroContextDirV72 == -1 ? v63Red : v63Amber
-    biasLeft = execDirV72 == 1 ? "BUY ACTIVO" : execDirV72 == -1 ? "SELL ACTIVO" : macroContextDirV72 == 1 ? "BUY CONTEXTO" : macroContextDirV72 == -1 ? "SELL CONTEXTO" : "NEUTRO"
+    modeLeft = stateCodeV73 == 10 ? "LATERAL" : marketBiasTxtV75
+    modeColor = stateCodeV73 == 10 ? v65Blue : marketBiasDirV75 == 1 ? v63Green : marketBiasDirV75 == -1 ? v63Red : v63Amber
+    biasLeft = buyLiveV73 or stateCodeV73 == 31 ? "BUY ACTIVO" : sellLiveV73 or stateCodeV73 == 32 ? "SELL ACTIVO" : marketBiasSideV75
     zoneLeft = stateCodeV73 == 31 or stateCodeV73 == 32 ? "ENTRADA ACTIVA" : stateCodeV73 == 21 ? "RECHAZO BUY / PREPARAR" : stateCodeV73 == 22 ? "RECHAZO SELL / PREPARAR" : buyLiveV73 or sellLiveV73 ? "POSICIÓN VIVA" : buyLocationV73 or sellLocationV73 ? "POI ACTIVO" : "BUSCANDO ZONA"
     actionLeft = actionTxtV73
     execColor = uxColorV75
@@ -1807,7 +1837,7 @@ f_drawAnalysisV67() =>
     table.cell(analysisV67, 0, 1, "MODO DEL MERCADO", text_color=v63Gray, bgcolor=v63Navy2, text_size=size.small)
     table.cell(analysisV67, 1, 1, modeLeft, text_color=modeColor, bgcolor=color.new(modeColor, 86), text_size=size.normal)
     table.cell(analysisV67, 0, 2, "ASERTIVIDAD", text_color=v63Gray, bgcolor=v63Navy, text_size=size.small)
-    table.cell(analysisV67, 1, 2, str.tostring(math.round(scoreShown)) + "%  " + f_barV63(scoreShown), text_color=scoreShown>=80?v63Green:scoreShown>=65?v63Amber:v63Gray, bgcolor=v63Navy, text_size=size.small)
+    table.cell(analysisV67, 1, 2, str.tostring(math.round(liveConfidenceV75)) + "%  " + f_barV63(liveConfidenceV75), text_color=liveConfidenceV75>=80?v63Green:liveConfidenceV75>=65?v63Amber:v63Gray, bgcolor=v63Navy, text_size=size.small)
     table.cell(analysisV67, 0, 3, "SESGO", text_color=v63Gray, bgcolor=v63Navy2, text_size=size.small)
     table.cell(analysisV67, 1, 3, biasLeft, text_color=execDirV72==1?v63Green:execDirV72==-1?v63Red:modeColor, bgcolor=v63Navy2, text_size=size.normal)
     table.cell(analysisV67, 0, 4, "ZONA ACTUAL", text_color=v63Gray, bgcolor=v63Navy, text_size=size.small)
@@ -1817,9 +1847,9 @@ f_drawAnalysisV67() =>
     table.cell(analysisV67, 0, 6, "PLAN OPERATIVO ACTUAL", text_color=v63Gold, bgcolor=v63Navy, text_size=size.small)
     table.cell(analysisV67, 1, 6, "ZONAS VIVAS", text_color=v63Gold, bgcolor=v63Navy, text_size=size.small)
     table.cell(analysisV67, 0, 7, "SELL DESDE", text_color=v63Red, bgcolor=v63Navy2, text_size=size.small)
-    table.cell(analysisV67, 1, 7, f_range(entrySellFrom, entrySellTo), text_color=v63Red, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(analysisV67, 1, 7, f_range(poiSellLoV74, poiSellHiV74) + " · " + poiSellTypeV74, text_color=v63Red, bgcolor=v63Navy2, text_size=size.small)
     table.cell(analysisV67, 0, 8, "BUY DESDE", text_color=v63Green, bgcolor=v63Navy, text_size=size.small)
-    table.cell(analysisV67, 1, 8, f_range(entryBuyFrom, entryBuyTo), text_color=v63Green, bgcolor=v63Navy, text_size=size.small)
+    table.cell(analysisV67, 1, 8, f_range(poiBuyLoV74, poiBuyHiV74) + " · " + poiBuyTypeV74, text_color=v63Green, bgcolor=v63Navy, text_size=size.small)
     table.cell(analysisV67, 0, 9, "RETROCESO", text_color=v63Amber, bgcolor=v63Navy2, text_size=size.small)
     table.cell(analysisV67, 1, 9, retroTxt, text_color=v63Amber, bgcolor=v63Navy2, text_size=size.small)
     table.cell(analysisV67, 0, 10, "PROTEGER", text_color=v65Blue, bgcolor=v63Navy, text_size=size.small)
@@ -1948,9 +1978,9 @@ f_drawCardsV63() =>
     table.cell(cardsV63, 0, 2, "VENTA   " + str.tostring(sellFlowPct) + "%", text_color=v63Red, bgcolor=v63Navy, text_size=size.small)
     table.cell(cardsV63, 0, 3, "DELTA   " + str.tostring(deltaSynthetic), text_color=deltaSynthetic >= 0 ? v63Green : v63Red, bgcolor=v63Navy2, text_size=size.small)
     table.cell(cardsV63, 0, 4, "VOLUMEN " + (volume > volBase20 ? "ALTO" : "NORMAL"), text_color=volume > volBase20 ? v63Amber : v63Cyan, bgcolor=v63Navy, text_size=size.small)
-    table.cell(cardsV63, 0, 5, "PULSO " + (masterDir == 1 ? "BUY" : masterDir == -1 ? "SELL" : "NEUTRO"), text_color=masterDir == 1 ? v63Green : masterDir == -1 ? v63Red : v63Gray, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(cardsV63, 0, 5, "PULSO " + marketBiasTxtV75 + " " + str.tostring(marketBiasStrengthV75) + "%", text_color=marketBiasDirV75 == 1 ? v63Green : marketBiasDirV75 == -1 ? v63Red : v63Gray, bgcolor=v63Navy2, text_size=size.small)
     table.cell(cardsV63, 1, 1, "REACCIÓN  " + reactionTxtV65, text_color=reactionColorV65, bgcolor=color.new(reactionColorV65, 88), text_size=size.small)
-    table.cell(cardsV63, 1, 2, "ZONA  " + (priceInsideEntry ? "EN PRECIO" : "BUSCANDO"), text_color=priceInsideEntry ? v63Cyan : v63Gray, bgcolor=v63Navy, text_size=size.small)
+    table.cell(cardsV63, 1, 2, "ZONA  " + (poiBuyTouchV74 ? "POI BUY" : poiSellTouchV74 ? "POI SELL" : "BUSCANDO"), text_color=poiBuyTouchV74 ? v63Green : poiSellTouchV74 ? v63Red : v63Gray, bgcolor=v63Navy, text_size=size.small)
     table.cell(cardsV63, 1, 3, "FASE  " + uxFase, text_color=runnerNow ? v63Green : retroNow ? v63Amber : preNow ? v63Cyan : color.white, bgcolor=v63Navy2, text_size=size.small)
     table.cell(cardsV63, 1, 4, "ESPACIO  " + uxSpaceTxt, text_color=noSpaceWait ? v63Red : v63Green, bgcolor=v63Navy, text_size=size.small)
     table.cell(cardsV63, 1, 5, "ACCIÓN  " + uxEstado, text_color=execEnterBuyV72 or execEnterSellV72 ? v63Green : execArmedBuyV72 or execArmedSellV72 ? v63Amber : noSpaceWait ? v63Red : v63Cyan, bgcolor=v63Navy2, text_size=size.small)
@@ -1978,8 +2008,8 @@ f_drawMobileV65() =>
     table.clear(mobileV65, 0, 0, 0, 12)
     stageMobileV65 = eventBlockV61 ? "BLOCK" : execEnterBuyV72 or execEnterSellV72 ? "EXECUTE" : execArmedBuyV72 or execArmedSellV72 ? "ARMED" : runnerNow ? "MANAGE" : "WATCH"
     stageColorMobileV65 = eventBlockV61 ? v63Red : execEnterBuyV72 ? v63Green : execEnterSellV72 ? v63Red : execArmedBuyV72 or execArmedSellV72 ? v63Amber : runnerNow ? v65Blue : v63Cyan
-    dirMobileV65 = masterDir == 1 ? "BUY" : masterDir == -1 ? "SELL" : "NEUTRO"
-    dirColorMobileV65 = masterDir == 1 ? v63Green : masterDir == -1 ? v63Red : v63Gray
+    dirMobileV65 = marketBiasDirV75 == 1 ? "BUY" : marketBiasDirV75 == -1 ? "SELL" : "NEUTRO"
+    dirColorMobileV65 = marketBiasDirV75 == 1 ? v63Green : marketBiasDirV75 == -1 ? v63Red : v63Gray
     actionMobileV65 = actionTxtV73
     actionColorMobileV65 = uxColorV75
 
@@ -1989,7 +2019,7 @@ f_drawMobileV65() =>
     table.cell(mobileV65, 0, 3, "FASE VIVA  " + stageMobileV65, text_color=stageColorMobileV65, bgcolor=color.new(stageColorMobileV65, 86), text_size=size.small)
     table.cell(mobileV65, 0, 4, "ZONA REACCIÓN  " + reactionTxtV65, text_color=reactionColorV65, bgcolor=color.new(reactionColorV65, 84), text_size=size.normal)
     table.cell(mobileV65, 0, 5, "PROX. ZONA  " + str.tostring(zoneProxPctV65) + "%", text_color=zoneProxPctV65 >= 80 ? v63Green : zoneProxPctV65 >= 55 ? v63Amber : v63Cyan, bgcolor=v63Navy2, text_size=size.small)
-    table.cell(mobileV65, 0, 6, "CALIDAD  " + str.tostring(math.round(scoreShown)) + "%", text_color=scoreShown >= 82 ? v63Green : scoreShown >= 68 ? v63Amber : v63Gray, bgcolor=v63Navy, text_size=size.small)
+    table.cell(mobileV65, 0, 6, "CALIDAD  " + str.tostring(math.round(liveConfidenceV75)) + "%", text_color=liveConfidenceV75 >= 82 ? v63Green : liveConfidenceV75 >= 68 ? v63Amber : v63Gray, bgcolor=v63Navy, text_size=size.small)
     table.cell(mobileV65, 0, 7, "PULSO TF  M5 " + tfDirTxt(d5) + " | M15 " + tfDirTxt(d15) + " | H1 " + tfDirTxt(d60), text_color=color.white, bgcolor=v63Navy2, text_size=size.small)
     table.cell(mobileV65, 0, 8, "RITMO  " + tempoMobileV66 + "  |  RIESGO " + executionRisk, text_color=executionRisk == "ALTO" ? v63Red : tempoColorMobileV66, bgcolor=v63Navy, text_size=size.small)
     table.cell(mobileV65, 0, 9, "GESTIÓN  " + manageTxtV61, text_color=runnerNow ? v63Green : protectPartialV61 ? v63Amber : color.white, bgcolor=v63Navy2, text_size=size.small)
@@ -2524,6 +2554,7 @@ f_msgV73(_side) =>
     msg += "\"entry_zone\":\"" + f_jsonSafe(planEntryTxtV73) + "\","
     msg += "\"plan_source\":\"" + planSourceTxtV73 + "\","
     msg += "\"context\":\"" + macroContextTxtV73 + "\","
+    msg += "\"market_bias\":\"" + marketBiasTxtV75 + " " + str.tostring(marketBiasStrengthV75) + "%\","
     msg += "\"core\":\"" + operationTxt + "\","
     msg += "\"state\":\"" + f_jsonSafe(stateTxtV73) + "\","
     msg += "\"retro_zone\":\"" + f_jsonSafe(retroTxt) + "\","
@@ -2631,7 +2662,7 @@ if barstate.islast
              stateCodeV73 == 51 or stateCodeV73 == 52 ? "RETROCESO SIN INVALIDACIÓN · " + liveTpTxtV75 :
              actionTxtV73
         centerBoxV71 := box.new(bar_index - 22, centerHighV73, bar_index + boxBarsRight, centerLowV73, xloc=xloc.bar_index, bgcolor=color.new(centerColorV73, 91), border_color=color.new(centerColorV73, 12), border_width=2)
-        centerTagV71 := label.new(bar_index + boxBarsRight, centerHighV73, "ZONA DE DECISIÓN\n" + stateTxtV73 + "\n" + centerDetailV73 + "\n" + poiTxtV74 + "\n" + stateZoneTxtV73, xloc=xloc.bar_index, style=label.style_label_left, color=color.new(centerColorV73, 8), textcolor=stateCodeV73 == 21 or stateCodeV73 == 22 or stateCodeV73 == 31 ? color.black : color.white, size=size.small)
+        centerTagV71 := label.new(bar_index + boxBarsRight, centerHighV73, "ZONA DE DECISIÓN\n" + stateTxtV73 + "\n" + centerDetailV73 + "\nCONTEXTO " + marketBiasTxtV75 + " " + str.tostring(marketBiasStrengthV75) + "%\n" + poiTxtV74 + "\n" + stateZoneTxtV73, xloc=xloc.bar_index, style=label.style_label_left, color=color.new(centerColorV73, 8), textcolor=stateCodeV73 == 21 or stateCodeV73 == 22 or stateCodeV73 == 31 ? color.black : color.white, size=size.small)
 // FVG vivos: mismo rastreador que usa la lógica (V48), con mitigación real.
 var box bullFvgBoxV71 = na
 var box bearFvgBoxV71 = na

@@ -63,3 +63,16 @@ señales y acierto en vivo.
 
 Compilación, que aparezcan entradas 31/32 en un gráfico M5/M15 con tendencia, y que
 el SL dibujado coincida con el del panel y la alerta.
+
+## V75.1 — aportes integrados desde la rama "LIVE POINTS + POI"
+
+- POINTS vivos: círculo bajo/sobre la vela cuando hay reacción en POI con
+  calidad ≥ 48 (color pleno si ≥ 78). Input "POINTS vivos".
+- Etiqueta BUY / SELL sobre la vela exacta donde se abre la posición.
+- Sesgo general MTF ponderado (`marketBias*`): alimenta MODO y SESGO del panel
+  izquierdo, PULSO de las cards, LECTURA MADRE del móvil, la caja central y el
+  campo `market_bias` de la alerta. No activa entradas por sí solo.
+- ASERTIVIDAD y CALIDAD muestran la confianza viva del estado (score del
+  motor cuando hay preparar/entrar; si no, el mayor entre sesgo MTF y calidad POI).
+- Zonas SELL/BUY del panel izquierdo muestran el POI real con su tipo.
+- EMAs ocultas por defecto (input), aviso vivo legacy y EXP legacy apagados.
