@@ -1,0 +1,2727 @@
+//@version=6
+indicator("IMPULXOR V75 POI STRUCTURE LIVE", shorttitle="IMPULXOR V75", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=250)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// IMPULXOR V75 — POI · ESTRUCTURA · EJECUCIÓN EN VIVO
+// Base: V73 (auditoría aplicada) + motor POI/estados de V74.1 corregido + capa de estructura.
+//  · Una sola máquina de estados manda en paneles, caja central, líneas y alertas.
+//  · POI = OB con volumen + FVG mitigable + Premium/Discount + EQH/EQL, con caducidad.
+//  · Posición viva con TP ✓, SL a entrada tras TP1, salida por objetivo/stop/tiempo y estadística en vivo.
+//  · Estructura swing e interna (BOS/CHoCH/HH/HL/LH/LL), EQH/EQL, SFP, Premium/Discount, PWH/PWL/PMH/PML, Killzones.
+//  · SL único acotado por ATR. CORE con reversa realista y vuelta a NEUTRO.
+// La receta interna no se muestra en paneles: solo estados operativos.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+//━━━━━━━━━━━━━━━━━━
+// INPUTS
+//━━━━━━━━━━━━━━━━━━
+grpBase = "01. BASE"
+emaFastLen  = input.int(9, "EMA 9", group=grpBase, display=display.none)
+emaMidLen   = input.int(21, "EMA 21", group=grpBase, display=display.none)
+emaSlowLen  = input.int(50, "EMA 50", group=grpBase, display=display.none)
+emaMacroLen = input.int(200, "EMA 200", group=grpBase, display=display.none)
+rsiLen      = input.int(14, "RSI", group=grpBase, display=display.none)
+atrLen      = input.int(14, "ATR", group=grpBase, display=display.none)
+adxLen      = input.int(14, "ADX", group=grpBase, display=display.none)
+
+grpEngine = "02. MOTOR"
+liqLookback        = input.int(36, "Lookback liquidez", minval=10, maxval=250, group=grpEngine, display=display.none)
+liqSwingFast       = input.int(12, "Swing rápido", minval=5, maxval=80, group=grpEngine, display=display.none)
+liqSwingSlow       = input.int(72, "Swing lento", minval=30, maxval=250, group=grpEngine, display=display.none)
+zoneAtr            = input.float(0.45, "Altura zona x ATR", step=0.05, group=grpEngine, display=display.none)
+maxFomoAtr         = input.float(0.95, "Máx NO FOMO x ATR", step=0.05, group=grpEngine, display=display.none)
+minEntrySoft       = input.int(61, "Entrada suave desde %", minval=40, maxval=100, group=grpEngine, display=display.none)
+minEntryStrong     = input.int(76, "Entrada fuerte desde %", minval=50, maxval=100, group=grpEngine, display=display.none)
+masterGap          = input.int(13, "Gap para cambiar dirección", minval=5, maxval=40, group=grpEngine, display=display.none)
+holdBarsMin        = input.int(6, "Velas mínimas CORE", minval=2, maxval=40, group=grpEngine, display=display.none)
+confirmReverseBars = input.int(2, "Confirmaciones reversa CORE", minval=1, maxval=6, group=grpEngine, display=display.none)
+reverseWindowBars  = input.int(10, "Ventana para contar confirmaciones (velas)", minval=2, maxval=40, group=grpEngine, display=display.none)
+reverseRaidBars    = input.int(6, "Barrida válida hasta N velas antes", minval=1, maxval=20, group=grpEngine, display=display.none)
+neutralResetBars   = input.int(30, "Velas sin ventaja para volver a NEUTRO", minval=5, maxval=200, group=grpEngine, display=display.none)
+volEventAtrMult    = input.float(1.60, "Umbral evento/volatilidad x ATR", minval=1.05, maxval=5.0, step=0.05, group=grpEngine, display=display.none)
+manualNewsRisk     = input.bool(false, "Bloqueo manual por noticia/evento", group=grpEngine, display=display.none)
+
+grpPlan = "03. PLAN"
+slAtr      = input.float(0.80, "SL mínimo x ATR", step=0.05, minval=0.2, maxval=5.0, group=grpPlan, display=display.none)
+slMaxAtr   = input.float(2.50, "SL máximo x ATR", step=0.10, minval=1.0, maxval=8.0, group=grpPlan, display=display.none)
+tp1Atr     = input.float(1.20, "TP1 ATR", step=0.05, group=grpPlan, display=display.none)
+tp2Atr     = input.float(2.20, "TP2 ATR", step=0.10, group=grpPlan, display=display.none)
+tp3Atr     = input.float(3.20, "TP3 ATR", step=0.10, group=grpPlan, display=display.none)
+tp4Atr     = input.float(4.20, "TP4 ATR", step=0.10, group=grpPlan, display=display.none)
+tp5Atr     = input.float(5.20, "TP5 ATR", step=0.10, group=grpPlan, display=display.none)
+nearAtr    = input.float(0.35, "Aviso soporte/resistencia cerca", step=0.05, group=grpPlan, display=display.none)
+
+grpVisual = "04. VISUAL"
+showMapBox    = input.bool(false, "Mostrar caja mapa", group=grpVisual, display=display.none)
+showTPLevels  = input.bool(true, "Mostrar líneas Entry/SL/TP", group=grpVisual, display=display.none)
+showLiveLabel = input.bool(true, "Mostrar aviso vivo", group=grpVisual, display=display.none)
+showImageDashboard = input.bool(true, "Dashboard estilo imagen", group=grpVisual, display=display.none)
+showHeatMapV63     = input.bool(false, "Mapa de calor / liquidez", group=grpVisual, display=display.none)
+heatLookbackV63    = input.int(80, "Heatmap lookback", minval=30, maxval=200, group=grpVisual, display=display.none)
+heatBinsV63        = input.int(20, "Heatmap bins", minval=12, maxval=30, group=grpVisual, display=display.none)
+manualNewsTitleV63 = input.string("Sin noticia cargada", "Noticia próxima", group=grpVisual, display=display.none)
+manualNewsLevelV63 = input.string("NINGUNO", "Impacto noticia", options=["NINGUNO","BAJO","MEDIO","ALTO"], group=grpVisual, display=display.none)
+boxBarsRight  = input.int(58, "Caja ancho derecha", minval=30, maxval=120, group=grpVisual, display=display.none)
+uiDeviceV65   = input.string("ESCRITORIO", "Vista adaptable", options=["MÓVIL","TABLET","ESCRITORIO"], group=grpVisual, display=display.none)
+uiVividV65    = input.bool(true, "Color vivo premium", group=grpVisual, display=display.none)
+
+showLivePoiV68       = input.bool(true, "POI oferta/demanda fuertes", group=grpVisual, display=display.none)
+showReactionV68      = input.bool(false, "Zona de reacción viva", group=grpVisual, display=display.none)
+showStrongSRV68      = input.bool(true, "Soporte/resistencia fuerte", group=grpVisual, display=display.none)
+showLastAbsV68       = input.bool(false, "Última absorción", group=grpVisual, display=display.none)
+showLastExpV68       = input.bool(true, "Última vela explosiva", group=grpVisual, display=display.none)
+showWatermarkV68     = input.bool(true, "Marca de agua IMPULXOR", group=grpVisual, display=display.none)
+eventVisibleBarsV68  = input.int(4, "Duración marcador reciente", minval=1, maxval=12, group=grpVisual, display=display.none)
+poiMaxAgeBars        = input.int(300, "Caducidad POI dibujado (velas)", minval=20, maxval=2000, group=grpVisual, display=display.none)
+
+grpICT = "05. ICT FORMAL"
+ictMssLookback = input.int(5, "MSS lookback", minval=2, maxval=20, group=grpICT, display=display.none)
+ictDealingLen  = input.int(20, "Internal dealing range", minval=10, maxval=80, group=grpICT, display=display.none)
+ictDispAtr     = input.float(0.75, "Displacement mínimo x ATR", step=0.05, group=grpICT, display=display.none)
+ictOteMin      = input.float(0.62, "OTE mínimo", step=0.01, minval=0.50, maxval=0.79, group=grpICT, display=display.none)
+ictOteMax      = input.float(0.79, "OTE máximo", step=0.01, minval=0.62, maxval=0.90, group=grpICT, display=display.none)
+ictUseKillzone = input.bool(true, "Usar Killzones como calidad", group=grpICT, display=display.none)
+ictTz          = input.string("America/New_York", "Zona horaria ICT", group=grpICT, display=display.none)
+ictLondon      = input.session("0200-0500", "London Killzone", group=grpICT, display=display.none)
+ictNewYork     = input.session("0700-1000", "New York Killzone", group=grpICT, display=display.none)
+ictLondonClose = input.session("1000-1200", "London Close", group=grpICT, display=display.none)
+ictAsiaV75     = input.session("2000-0000", "Asia Range", group=grpICT, display=display.none)
+obMaxAgeBars   = input.int(150, "Caducidad Order Block (velas)", minval=10, maxval=1000, group=grpICT, display=display.none)
+
+grpFractal = "06. PREVIOUS DAY / FRACTAL"
+showPrevDayMap = input.bool(true, "Mostrar PDH/PDL/EQ", group=grpFractal, display=display.none)
+fractalMinAlign = input.int(4, "Alineación fractal mínima", minval=2, maxval=5, group=grpFractal, display=display.none)
+prevDayRaidAtr = input.float(0.10, "Tolerancia raid PDH/PDL x ATR", step=0.05, minval=0.0, maxval=1.0, group=grpFractal, display=display.none)
+
+grpV71 = "07. ZONAS VIVAS"
+showCenterBoxV71 = input.bool(true, "Caja central viva única", group=grpV71, display=display.none)
+showFvgV71       = input.bool(true, "Imbalance / FVG vivos", group=grpV71, display=display.none)
+showLiquidityV71 = input.bool(true, "Liquidez BSL / SSL", group=grpV71, display=display.none)
+showStructV71    = input.bool(true, "BOS / CHoCH / MSS", group=grpV71, display=display.none)
+showAbsV71       = input.bool(true, "Puntos de absorción PRO", group=grpV71, display=display.none)
+showTradeBarsV71 = input.bool(true, "Velas de fuerza", group=grpV71, display=display.none)
+
+grpV75 = "08. ESTRUCTURA & POI V75"
+showSwingStructV75   = input.bool(true, "Estructura swing: BOS / CHoCH", group=grpV75, display=display.none)
+showSwingLabelsV75   = input.bool(true, "Etiquetas HH / HL / LH / LL", group=grpV75, display=display.none)
+swingLenV75          = input.int(10, "Pivote swing (velas)", minval=3, maxval=50, group=grpV75, display=display.none)
+showInternalStructV75 = input.bool(true, "Estructura interna: iBOS / iCHoCH", group=grpV75, display=display.none)
+internalLenV75       = input.int(4, "Pivote interno (velas)", minval=2, maxval=20, group=grpV75, display=display.none)
+maxStructObjV75      = input.int(8, "Máx. objetos por capa de estructura", minval=2, maxval=30, group=grpV75, display=display.none)
+structEventBarsV75   = input.int(3, "Velas que dura un evento estructural", minval=1, maxval=50, group=grpV75, display=display.none)
+showEqV75            = input.bool(true, "EQH / EQL en gráfico", group=grpV75, display=display.none)
+showSfpV75           = input.bool(true, "SFP (fallo de swing)", group=grpV75, display=display.none)
+showPdZonesV75       = input.bool(true, "Premium / Equilibrium / Discount", group=grpV75, display=display.none)
+rangeLenV75          = input.int(90, "Rango para Premium/Discount (velas)", minval=30, maxval=300, group=grpV75, display=display.none)
+showMtfLevelsV75     = input.bool(true, "Niveles semana/mes previos (PWH/PWL/PMH/PML)", group=grpV75, display=display.none)
+showKillzoneBgV75    = input.bool(true, "Fondo Killzones (Asia/London/NY)", group=grpV75, display=display.none)
+showRrBoxesV75       = input.bool(true, "Cajas riesgo / beneficio", group=grpV75, display=display.none)
+showStatsPanelV75    = input.bool(true, "Panel ESTRUCTURA & SETUP (abajo izquierda)", group=grpV75, display=display.none)
+moveSlToBeV75        = input.bool(true, "Mover SL a entrada tras TP1 y escalonar", group=grpV75, display=display.none)
+entryWindowBarsV75   = input.int(3, "Velas que dura ENTRAR YA", minval=1, maxval=10, group=grpV75, display=display.none)
+tradeMaxBarsV75      = input.int(80, "Velas máximas de una posición viva", minval=10, maxval=500, group=grpV75, display=display.none)
+poiMinPrepareV75     = input.int(50, "Calidad POI mínima para PREPARAR", minval=30, maxval=90, group=grpV75, display=display.none)
+poiMinEnterV75       = input.int(58, "Calidad POI mínima para ENTRAR", minval=40, maxval=95, group=grpV75, display=display.none)
+liveScoreEnterV75    = input.int(60, "Score vivo mínimo para ENTRAR", minval=40, maxval=95, group=grpV75, display=display.none)
+
+//━━━━━━━━━━━━━━━━━━
+// BASE
+//━━━━━━━━━━━━━━━━━━
+ema9   = ta.ema(close, emaFastLen)
+ema21  = ta.ema(close, emaMidLen)
+ema50  = ta.ema(close, emaSlowLen)
+ema200 = ta.ema(close, emaMacroLen)
+atr    = ta.atr(atrLen)
+[diPlus, diMinus, adx] = ta.dmi(adxLen, adxLen)
+
+body = math.abs(close - open)
+bodySafe = body == 0.0 ? syminfo.mintick : body
+rng = math.max(high - low, syminfo.mintick)
+upperWick = high - math.max(open, close)
+lowerWick = math.min(open, close) - low
+closeNearHigh = (high - close) / rng < 0.28
+closeNearLow  = (close - low) / rng < 0.28
+
+// Helpers de texto seguros ante na (evita "NaN" en paneles y alertas).
+f_px(_v) => na(_v) ? "-" : str.tostring(_v, format.mintick)
+f_range(_a, _b) => na(_a) or na(_b) ? "-" : str.tostring(_a, format.mintick) + " - " + str.tostring(_b, format.mintick)
+
+//━━━━━━━━━━━━━━━━━━
+// MTF — V73: UNA SOLA REQUEST POR TEMPORALIDAD
+// Antes: 4 requests en f_dir + 1 en f_rsi por cada TF (35 llamadas).
+// Ahora: 1 tupla por TF (7 llamadas). Misma lógica de dirección.
+//━━━━━━━━━━━━━━━━━━
+f_mtf(tf) =>
+    [c, e9, e21, rr] = request.security(syminfo.tickerid, tf, [close, ta.ema(close, emaFastLen), ta.ema(close, emaMidLen), ta.rsi(close, rsiLen)], barmerge.gaps_off, barmerge.lookahead_off)
+    d = c > e9 and e9 > e21 and rr > 50 ? 1 : c < e9 and e9 < e21 and rr < 50 ? -1 : 0
+    [d, rr]
+
+[d1, r1]     = f_mtf("1")
+[d5, r5]     = f_mtf("5")
+[d15, r15]   = f_mtf("15")
+[d30, r30]   = f_mtf("30")
+[d45, r45]   = f_mtf("45")
+[d60, r60]   = f_mtf("60")
+[d120, r120] = f_mtf("120")
+[d240, r240] = f_mtf("240")
+[dD, rD]     = f_mtf("D")
+
+// H3 institucional: incluye rango de 36 velas para el motor madre.
+[h3Close, h3E9, h3E21, r180, h3HighRaw, h3LowRaw] = request.security(syminfo.tickerid, "180", [close, ta.ema(close, emaFastLen), ta.ema(close, emaMidLen), ta.rsi(close, rsiLen), ta.highest(high[1], 36), ta.lowest(low[1], 36)], barmerge.gaps_off, barmerge.lookahead_off)
+d180 = h3Close > h3E9 and h3E9 > h3E21 and r180 > 50 ? 1 : h3Close < h3E9 and h3E9 < h3E21 and r180 < 50 ? -1 : 0
+
+// Fuerza visible por temporalidad. Score direccional 0-100, no probabilidad.
+// V73: devuelve 0 cuando el RSI del marco aún no existe (historial corto de M1).
+f_tfStrengthV67(d, rr) =>
+    na(rr) ? 0 :
+     d == 0 ? math.round(math.min(49.0, math.abs(rr - 50.0) * 1.55)) :
+     math.round(math.min(100.0, 55.0 + math.abs(rr - 50.0) * 1.80))
+
+tfDirTxt(d) => d == 1 ? "BUY" : d == -1 ? "SELL" : "NEUTRO"
+
+mtfBuy  = (d1 == 1 ? 6 : 0) + (d5 == 1 ? 16 : 0) + (d15 == 1 ? 18 : 0) + (d30 == 1 ? 10 : 0) + (d45 == 1 ? 8 : 0) + (d60 == 1 ? 10 : 0) + (d120 == 1 ? 8 : 0) + (d180 == 1 ? 8 : 0) + (d240 == 1 ? 8 : 0) + (dD == 1 ? 8 : 0)
+mtfSell = (d1 == -1 ? 6 : 0) + (d5 == -1 ? 16 : 0) + (d15 == -1 ? 18 : 0) + (d30 == -1 ? 10 : 0) + (d45 == -1 ? 8 : 0) + (d60 == -1 ? 10 : 0) + (d120 == -1 ? 8 : 0) + (d180 == -1 ? 8 : 0) + (d240 == -1 ? 8 : 0) + (dD == -1 ? 8 : 0)
+
+//━━━━━━━━━━━━━━━━━━
+// LIQUIDEZ / ZONAS
+//━━━━━━━━━━━━━━━━━━
+[dayHigh, dayLow, prevDayHigh, prevDayLow] = request.security(syminfo.tickerid, "D", [high, low, high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
+dayRange = math.max(dayHigh - dayLow, syminfo.mintick)
+fib31 = dayLow + dayRange * 0.31
+fib50 = dayLow + dayRange * 0.50
+fib68 = dayLow + dayRange * 0.68
+
+liqHigh = ta.highest(high[1], liqLookback)
+liqLow  = ta.lowest(low[1], liqLookback)
+liqHighFast = ta.highest(high[1], liqSwingFast)
+liqLowFast  = ta.lowest(low[1], liqSwingFast)
+liqHighSlow = ta.highest(high[1], liqSwingSlow)
+liqLowSlow  = ta.lowest(low[1], liqSwingSlow)
+
+upperLiquidity = math.max(liqHigh, math.max(liqHighFast, liqHighSlow))
+lowerLiquidity = math.min(liqLow, math.min(liqLowFast, liqLowSlow))
+
+buyBaseLow  = math.min(lowerLiquidity - atr * zoneAtr, ema21 - atr * 0.35)
+buyBaseHigh = math.max(lowerLiquidity + atr * zoneAtr, ema21 + atr * 0.35)
+buyZoneFrom = math.min(buyBaseLow, fib31)
+buyZoneTo   = math.max(buyBaseHigh, fib50)
+
+sellBaseLow  = math.min(upperLiquidity - atr * zoneAtr, ema21 - atr * 0.35)
+sellBaseHigh = math.max(upperLiquidity + atr * zoneAtr, ema21 + atr * 0.35)
+sellZoneFrom = math.min(sellBaseLow, fib50)
+sellZoneTo   = math.max(sellBaseHigh, fib68)
+
+inBuyZone  = low <= buyZoneTo and high >= buyZoneFrom
+inSellZone = high >= sellZoneFrom and low <= sellZoneTo
+
+//━━━━━━━━━━━━━━━━━━
+// CANAL / SOP RES
+//━━━━━━━━━━━━━━━━━━
+channelLen = 34
+chHigh = ta.highest(high, channelLen)
+chLow  = ta.lowest(low, channelLen)
+chRange = math.max(chHigh - chLow, syminfo.mintick)
+inChannel = chRange <= atr * 8.0
+
+supportTouch = low <= chLow + atr * 0.30 or inBuyZone
+resistTouch  = high >= chHigh - atr * 0.30 or inSellZone
+
+supportStrength = math.round(math.min(100.0, math.max(0.0, 35.0 + (supportTouch ? 25.0 : 0.0) + (lowerWick > bodySafe ? 15.0 : 0.0) + (d15 == 1 ? 15.0 : 0.0) + (diPlus > diMinus ? 10.0 : 0.0))))
+resistStrength  = math.round(math.min(100.0, math.max(0.0, 35.0 + (resistTouch ? 25.0 : 0.0) + (upperWick > bodySafe ? 15.0 : 0.0) + (d15 == -1 ? 15.0 : 0.0) + (diMinus > diPlus ? 10.0 : 0.0))))
+
+nearSupport = math.abs(close - chLow) <= atr * nearAtr or math.abs(close - buyZoneTo) <= atr * nearAtr
+nearResist  = math.abs(close - chHigh) <= atr * nearAtr or math.abs(close - sellZoneFrom) <= atr * nearAtr
+
+//━━━━━━━━━━━━━━━━━━
+// FLOW
+//━━━━━━━━━━━━━━━━━━
+volSafe = nz(volume, 1.0)
+volBase20 = ta.sma(volume, 20)   // V73: fuera del panel para que ta.sma se calcule en cada vela.
+clv = ((close - low) - (high - close)) / rng
+flowRaw = clv * volSafe
+flowFast = ta.ema(flowRaw, 3)
+flowSlow = ta.ema(flowRaw, 13)
+flowAbsMa = math.max(ta.sma(math.abs(flowRaw), 20), 1.0)
+
+buyPressure  = flowFast > flowSlow and flowFast > 0
+sellPressure = flowFast < flowSlow and flowFast < 0
+
+deltaSynthetic = math.round(flowFast / flowAbsMa * 12.0)
+deltaAccelerationBuy  = flowFast > flowFast[1] and buyPressure
+deltaAccelerationSell = flowFast < flowFast[1] and sellPressure
+pocDefendedBuy  = close > ema9 and lowerWick > bodySafe * 0.45 and buyPressure
+pocDefendedSell = close < ema9 and upperWick > bodySafe * 0.45 and sellPressure
+
+//━━━━━━━━━━━━━━━━━━
+// MICROESTRUCTURA
+//━━━━━━━━━━━━━━━━━━
+compression = ta.sma(rng, 5) < ta.sma(rng, 20) * 0.78 and ta.highest(rng, 5) < atr * 1.10
+adxWake = adx > adx[1] and adx[1] >= adx[2] and adx > 14
+
+sweepDown = low < lowerLiquidity - atr * 0.04 and close > lowerLiquidity
+sweepUp   = high > upperLiquidity + atr * 0.04 and close < upperLiquidity
+
+microBosBuy  = close > ta.highest(high[1], 3)
+microBosSell = close < ta.lowest(low[1], 3)
+
+absorbBuy  = inBuyZone and (lowerWick > bodySafe * 0.70 or sweepDown) and close > low + rng * 0.55 and (buyPressure or diPlus >= diMinus)
+absorbSell = inSellZone and (upperWick > bodySafe * 0.70 or sweepUp) and close < high - rng * 0.55 and (sellPressure or diMinus >= diPlus)
+
+seqAbsorbBuy  = math.sum(lowerWick > bodySafe * 0.50 and close > low + rng * 0.45 ? 1.0 : 0.0, 3) >= 2
+seqAbsorbSell = math.sum(upperWick > bodySafe * 0.50 and close < high - rng * 0.45 ? 1.0 : 0.0, 3) >= 2
+
+trapBuy  = sweepDown and close > open and (absorbBuy or seqAbsorbBuy or pocDefendedBuy)
+trapSell = sweepUp and close < open and (absorbSell or seqAbsorbSell or pocDefendedSell)
+
+//━━━━━━━━━━━━━━━━━━
+// RETROCESO
+//━━━━━━━━━━━━━━━━━━
+buyPullFrom  = math.min(ema9, ema21)
+buyPullTo    = math.max(ema9, ema21) + atr * 0.35
+sellPullFrom = math.min(ema9, ema21) - atr * 0.35
+sellPullTo   = math.max(ema9, ema21)
+
+buyTrendAlive  = close > ema21 and ema9 >= ema21 and (d5 == 1 or d15 == 1 or mtfBuy > mtfSell)
+sellTrendAlive = close < ema21 and ema9 <= ema21 and (d5 == -1 or d15 == -1 or mtfSell > mtfBuy)
+
+buyPullback  = buyTrendAlive and close >= buyPullFrom - atr * 0.25 and close <= buyPullTo + atr * 0.25
+sellPullback = sellTrendAlive and close <= sellPullTo + atr * 0.25 and close >= sellPullFrom - atr * 0.25
+
+buyPullbackDying  = buyPullback and upperWick < upperWick[1] and body <= body[1] * 1.15 and not sellPressure and close >= ema9 - atr * 0.15
+sellPullbackDying = sellPullback and lowerWick < lowerWick[1] and body <= body[1] * 1.15 and not buyPressure and close <= ema9 + atr * 0.15
+
+buyContinuation  = buyTrendAlive and (buyPullbackDying or absorbBuy or seqAbsorbBuy or microBosBuy or pocDefendedBuy) and diPlus >= diMinus
+sellContinuation = sellTrendAlive and (sellPullbackDying or absorbSell or seqAbsorbSell or microBosSell or pocDefendedSell) and diMinus >= diPlus
+
+//━━━━━━━━━━━━━━━━━━
+// NO FOMO / IMPULSO
+//━━━━━━━━━━━━━━━━━━
+buyDistATR  = atr > 0 ? math.max(0.0, close - buyZoneTo) / atr : 999.0
+sellDistATR = atr > 0 ? math.max(0.0, sellZoneFrom - close) / atr : 999.0
+
+buyNoFomo  = buyDistATR <= maxFomoAtr and (close - ema9) <= atr * 1.15
+sellNoFomo = sellDistATR <= maxFomoAtr and (ema9 - close) <= atr * 1.15
+
+buyImpulse  = close > open and body >= atr * 0.18 and closeNearHigh and close > ema9
+sellImpulse = close < open and body >= atr * 0.18 and closeNearLow and close < ema9
+
+//━━━━━━━━━━━━━━━━━━
+// V39.2 — ANTICIPACIÓN DE IMPULSO / BLOQUEO DE AGOTAMIENTO
+//━━━━━━━━━━━━━━━━━━
+velBody = math.abs(close - close[1])
+velMa = math.max(ta.sma(math.abs(close - close[1]), 14), syminfo.mintick)
+velocityWakeBuy  = close > close[1] and velBody > velMa * 1.15 and close > open
+velocityWakeSell = close < close[1] and velBody > velMa * 1.15 and close < open
+rangeExpansion = rng > ta.sma(rng, 20) * 1.05 or body > ta.sma(body, 20) * 1.18
+microCloseBuy  = close > low + rng * 0.62 and close > open and lowerWick >= upperWick * 0.70
+microCloseSell = close < high - rng * 0.62 and close < open and upperWick >= lowerWick * 0.70
+hiddenAccumBuy  = (compression or compression[1]) and (sweepDown or absorbBuy or seqAbsorbBuy or pocDefendedBuy) and (buyPressure or deltaAccelerationBuy or velocityWakeBuy)
+hiddenDistribSell = (compression or compression[1]) and (sweepUp or absorbSell or seqAbsorbSell or pocDefendedSell) and (sellPressure or deltaAccelerationSell or velocityWakeSell)
+smartBirthBuy  = hiddenAccumBuy and (microCloseBuy or microBosBuy or adxWake or rangeExpansion) and (d5 == 1 or d15 == 1 or mtfBuy >= mtfSell)
+smartBirthSell = hiddenDistribSell and (microCloseSell or microBosSell or adxWake or rangeExpansion) and (d5 == -1 or d15 == -1 or mtfSell >= mtfBuy)
+lateBuyExhaustion = close > ema21 + atr * 1.85 and upperWick > bodySafe * 0.85 and not buyPressure
+lateSellExhaustion = close < ema21 - atr * 1.85 and lowerWick > bodySafe * 0.85 and not sellPressure
+antiTopBuy = nearResist and resistStrength >= 70 and not microBosBuy and not smartBirthBuy
+antiBottomSell = nearSupport and supportStrength >= 70 and not microBosSell and not smartBirthSell
+smartBuyAllowed = smartBirthBuy and not lateBuyExhaustion and not antiTopBuy
+smartSellAllowed = smartBirthSell and not lateSellExhaustion and not antiBottomSell
+
+//━━━━━━━━━━━━━━━━━━
+// V47 — MACRO RANGE + LIQUIDITY MAP ENGINE
+// V73: una tupla por temporalidad (4 llamadas en vez de 6; ATR macro sin uso eliminado).
+//━━━━━━━━━━━━━━━━━━
+macroLookbackD = 30
+macroLookbackH4 = 42
+[macroHighD, macroLowD]   = request.security(syminfo.tickerid, "D", [ta.highest(high[1], macroLookbackD), ta.lowest(low[1], macroLookbackD)], barmerge.gaps_off, barmerge.lookahead_off)
+[macroHighH4, macroLowH4] = request.security(syminfo.tickerid, "240", [ta.highest(high[1], macroLookbackH4), ta.lowest(low[1], macroLookbackH4)], barmerge.gaps_off, barmerge.lookahead_off)
+
+macroHigh = math.max(macroHighD, macroHighH4)
+macroLow = math.min(macroLowD, macroLowH4)
+macroRange = math.max(macroHigh - macroLow, syminfo.mintick)
+macroMid = macroLow + macroRange * 0.50
+macroDiscount = close <= macroMid
+macroPremium = close >= macroMid
+
+macroSupportFrom = macroLow
+macroSupportTo = macroLow + math.max(atr * 0.85, macroRange * 0.075)
+macroResistFrom = macroHigh - math.max(atr * 0.85, macroRange * 0.075)
+macroResistTo = macroHigh
+
+macroInSupport = low <= macroSupportTo and high >= macroSupportFrom
+macroInResist = high >= macroResistFrom and low <= macroResistTo
+macroNearSupport = math.abs(close - macroSupportTo) <= atr * 0.75 or macroInSupport
+macroNearResist = math.abs(close - macroResistFrom) <= atr * 0.75 or macroInResist
+
+macroSweepDown = low < macroSupportFrom - atr * 0.08 and close > macroSupportFrom
+macroSweepUp = high > macroResistTo + atr * 0.08 and close < macroResistTo
+macroReclaimBuy = macroSweepDown and close > macroSupportTo - atr * 0.35 and (lowerWick > bodySafe * 0.70 or closeNearHigh)
+macroRejectSell = macroSweepUp and close < macroResistFrom + atr * 0.35 and (upperWick > bodySafe * 0.70 or closeNearLow)
+
+macroBreakBuy = close > macroResistTo and body >= atr * 0.28 and (buyPressure or diPlus > diMinus)
+macroBreakSell = close < macroSupportFrom and body >= atr * 0.28 and (sellPressure or diMinus > diPlus)
+
+macroPullbackBuy = close > macroMid and low <= macroResistFrom + atr * 0.55 and close >= macroResistFrom - atr * 0.35 and not macroRejectSell
+macroPullbackSell = close < macroMid and high >= macroSupportTo - atr * 0.55 and close <= macroSupportTo + atr * 0.35 and not macroReclaimBuy
+
+macroAccumulationBuy = macroNearSupport and (macroSweepDown or absorbBuy or seqAbsorbBuy or pocDefendedBuy) and (buyPressure or deltaAccelerationBuy or adxWake)
+macroDistributionSell = macroNearResist and (macroSweepUp or absorbSell or seqAbsorbSell or pocDefendedSell) and (sellPressure or deltaAccelerationSell or adxWake)
+
+macroContinuationBuy = (macroBreakBuy or macroPullbackBuy or macroAccumulationBuy) and (d60 == 1 or d240 == 1 or dD == 1 or mtfBuy >= mtfSell) and not lateBuyExhaustion
+macroContinuationSell = (macroBreakSell or macroPullbackSell or macroDistributionSell) and (d60 == -1 or d240 == -1 or dD == -1 or mtfSell >= mtfBuy) and not lateSellExhaustion
+
+macroManipulationBuy = macroSweepDown and (trapBuy or absorbBuy or seqAbsorbBuy) and close > low + rng * 0.60
+macroManipulationSell = macroSweepUp and (trapSell or absorbSell or seqAbsorbSell) and close < high - rng * 0.60
+
+macroNoBuyTop = macroNearResist and not macroBreakBuy and not macroPullbackBuy and resistStrength >= 65
+macroNoSellBottom = macroNearSupport and not macroBreakSell and not macroPullbackSell and supportStrength >= 65
+
+macroEntryBuy = (macroContinuationBuy or macroManipulationBuy) and not macroNoBuyTop
+macroEntrySell = (macroContinuationSell or macroManipulationSell) and not macroNoSellBottom
+
+macroBiasBuy = (d60 == 1 ? 18.0 : 0.0) + (d240 == 1 ? 22.0 : 0.0) + (dD == 1 ? 18.0 : 0.0) + (macroDiscount ? 8.0 : 0.0) + (macroEntryBuy ? 22.0 : 0.0)
+macroBiasSell = (d60 == -1 ? 18.0 : 0.0) + (d240 == -1 ? 22.0 : 0.0) + (dD == -1 ? 18.0 : 0.0) + (macroPremium ? 8.0 : 0.0) + (macroEntrySell ? 22.0 : 0.0)
+macroBiasBuy := math.max(0.0, math.min(100.0, macroBiasBuy))
+macroBiasSell := math.max(0.0, math.min(100.0, macroBiasSell))
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V48 — LIQUIDITY & POI INTELLIGENCE ENGINE
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// 1) MOTOR MADRE H3/H4
+h3High = h3HighRaw
+h3Low = h3LowRaw
+h3Range = math.max(h3High - h3Low, syminfo.mintick)
+h3Mid = h3Low + h3Range * 0.50
+h3Discount = close <= h3Mid
+h3Premium = close >= h3Mid
+
+h4Mid = macroLowH4 + math.max(macroHighH4 - macroLowH4, syminfo.mintick) * 0.50
+h4Discount = close <= h4Mid
+h4Premium = close >= h4Mid
+
+institutionalBiasBuy = (d180 == 1 or d240 == 1) and (h3Discount or h4Discount) and not macroNoBuyTop
+institutionalBiasSell = (d180 == -1 or d240 == -1) and (h3Premium or h4Premium) and not macroNoSellBottom
+motherBias = institutionalBiasBuy and not institutionalBiasSell ? 1 : institutionalBiasSell and not institutionalBiasBuy ? -1 : d180 == d240 ? d180 : 0
+
+// 2) EXTERNAL LIQUIDITY
+externalHigh = math.max(h3High, macroHighH4)
+externalLow = math.min(h3Low, macroLowH4)
+externalSweepHigh = high > externalHigh and close < externalHigh
+externalSweepLow = low < externalLow and close > externalLow
+
+extPivotHigh = ta.pivothigh(high, 3, 3)
+extPivotLow = ta.pivotlow(low, 3, 3)
+lastExtPH = ta.valuewhen(not na(extPivotHigh), extPivotHigh, 0)
+prevExtPH = ta.valuewhen(not na(extPivotHigh), extPivotHigh, 1)
+lastExtPL = ta.valuewhen(not na(extPivotLow), extPivotLow, 0)
+prevExtPL = ta.valuewhen(not na(extPivotLow), extPivotLow, 1)
+eqTol = atr * 0.18
+externalEQH = not na(lastExtPH) and not na(prevExtPH) and math.abs(lastExtPH - prevExtPH) <= eqTol
+externalEQL = not na(lastExtPL) and not na(prevExtPL) and math.abs(lastExtPL - prevExtPL) <= eqTol
+externalLiquidityAbove = externalEQH ? math.max(lastExtPH, prevExtPH) : externalHigh
+externalLiquidityBelow = externalEQL ? math.min(lastExtPL, prevExtPL) : externalLow
+
+// 3) INTERNAL LIQUIDITY / INDUCEMENT
+internalHigh = ta.highest(high[1], 8)
+internalLow = ta.lowest(low[1], 8)
+internalSweepUp = high > internalHigh and close < internalHigh
+internalSweepDown = low < internalLow and close > internalLow
+inducementBuy = internalSweepDown and not externalSweepLow and close > open
+inducementSell = internalSweepUp and not externalSweepHigh and close < open
+intPivotHigh = ta.pivothigh(high, 2, 2)
+intPivotLow = ta.pivotlow(low, 2, 2)
+lastIntPH = ta.valuewhen(not na(intPivotHigh), intPivotHigh, 0)
+prevIntPH = ta.valuewhen(not na(intPivotHigh), intPivotHigh, 1)
+lastIntPL = ta.valuewhen(not na(intPivotLow), intPivotLow, 0)
+prevIntPL = ta.valuewhen(not na(intPivotLow), intPivotLow, 1)
+internalEQH = not na(lastIntPH) and not na(prevIntPH) and math.abs(lastIntPH - prevIntPH) <= atr * 0.10
+internalEQL = not na(lastIntPL) and not na(prevIntPL) and math.abs(lastIntPL - prevIntPL) <= atr * 0.10
+
+// 4) FVG / IMBALANCE — V73: un solo rastreador con mitigación real.
+// Antes el FVG de V48 nunca se mitigaba y volvía a "activarse" meses después.
+bullFvgNow = low > high[2] and (low - high[2]) >= atr * 0.08
+bearFvgNow = high < low[2] and (low[2] - high) >= atr * 0.08
+var float bullFvgLow = na
+var float bullFvgHigh = na
+var int bullFvgBar = na
+var float bearFvgLow = na
+var float bearFvgHigh = na
+var int bearFvgBar = na
+if bullFvgNow
+    bullFvgLow := high[2]
+    bullFvgHigh := low
+    bullFvgBar := bar_index
+if bearFvgNow
+    bearFvgLow := high
+    bearFvgHigh := low[2]
+    bearFvgBar := bar_index
+bullFvgActive = not na(bullFvgLow) and low <= bullFvgHigh and high >= bullFvgLow
+bearFvgActive = not na(bearFvgLow) and high >= bearFvgLow and low <= bearFvgHigh
+bullFvgFilled = not na(bullFvgLow) and (low <= bullFvgLow or bar_index - bullFvgBar > poiMaxAgeBars)
+bearFvgFilled = not na(bearFvgHigh) and (high >= bearFvgHigh or bar_index - bearFvgBar > poiMaxAgeBars)
+if bullFvgFilled
+    bullFvgLow := na
+    bullFvgHigh := na
+    bullFvgBar := na
+if bearFvgFilled
+    bearFvgLow := na
+    bearFvgHigh := na
+    bearFvgBar := na
+
+// 5) ORDER BLOCK VÁLIDO POR DESPLAZAMIENTO — V73: con caducidad.
+bullDisplacement = close > open and body >= atr * 0.65 and close > high[1]
+bearDisplacement = close < open and body >= atr * 0.65 and close < low[1]
+bullObCond = bullDisplacement and close[1] < open[1]
+bearObCond = bearDisplacement and close[1] > open[1]
+bullObLow = ta.valuewhen(bullObCond, low[1], 0)
+bullObHigh = ta.valuewhen(bullObCond, high[1], 0)
+bearObLow = ta.valuewhen(bearObCond, low[1], 0)
+bearObHigh = ta.valuewhen(bearObCond, high[1], 0)
+bullObAge = ta.barssince(bullObCond)
+bearObAge = ta.barssince(bearObCond)
+bullObFresh = not na(bullObAge) and bullObAge <= obMaxAgeBars and not na(bullObLow)
+bearObFresh = not na(bearObAge) and bearObAge <= obMaxAgeBars and not na(bearObLow)
+bullObTouch = bullObFresh and low <= bullObHigh and high >= bullObLow
+bearObTouch = bearObFresh and high >= bearObLow and low <= bearObHigh
+
+// 6) BREAKER / RETEST + CONFLUENCIA POI
+bullBreaker = bearObFresh and close > bearObHigh and low <= bearObHigh + atr * 0.20
+bearBreaker = bullObFresh and close < bullObLow and high >= bullObLow - atr * 0.20
+poiBuyConfluence = (bullObTouch or bullFvgActive or bullBreaker) and (h3Discount or h4Discount or macroDiscount)
+poiSellConfluence = (bearObTouch or bearFvgActive or bearBreaker) and (h3Premium or h4Premium or macroPremium)
+
+// 7) UBICACIÓN SEPARADA DE FUERZA
+locationBuyRaw = (h3Discount ? 24.0 : 0.0) + (h4Discount ? 22.0 : 0.0) + (externalSweepLow or macroSweepDown ? 22.0 : 0.0) + (poiBuyConfluence ? 22.0 : 0.0) + (internalSweepDown or inducementBuy ? 10.0 : 0.0)
+locationSellRaw = (h3Premium ? 24.0 : 0.0) + (h4Premium ? 22.0 : 0.0) + (externalSweepHigh or macroSweepUp ? 22.0 : 0.0) + (poiSellConfluence ? 22.0 : 0.0) + (internalSweepUp or inducementSell ? 10.0 : 0.0)
+locationBuyQuality = math.min(100.0, locationBuyRaw)
+locationSellQuality = math.min(100.0, locationSellRaw)
+
+institutionalBuyBoost = institutionalBiasBuy ? 8.0 : motherBias == -1 ? -12.0 : 0.0
+institutionalSellBoost = institutionalBiasSell ? 8.0 : motherBias == 1 ? -12.0 : 0.0
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V50 — PREVIOUS DAY & FRACTAL CONTEXT ENGINE
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+float pdh = prevDayHigh
+float pdl = prevDayLow
+float pdRange = math.max(pdh - pdl, syminfo.mintick)
+float pdEq = pdl + pdRange * 0.50
+
+float pd690 = pdl + pdRange * 0.690
+float pd850 = pdl + pdRange * 0.850
+float pdBuy690 = pdh - pdRange * 0.690
+float pdBuy850 = pdh - pdRange * 0.850
+
+bool pdPremium = close > pdEq
+bool pdDiscount = close < pdEq
+bool pdAboveHigh = close > pdh
+bool pdBelowLow = close < pdl
+
+float pdRaidTol = atr * prevDayRaidAtr
+bool pdhRaid = high > pdh + pdRaidTol and close < pdh
+bool pdlRaid = low < pdl - pdRaidTol and close > pdl
+bool pdhReclaim = low < pdh and close > pdh
+bool pdlReclaim = high > pdl and close < pdl
+
+float pdSellOteLow = math.min(pd690, pd850)
+float pdSellOteHigh = math.max(pd690, pd850)
+float pdBuyOteLow = math.min(pdBuy850, pdBuy690)
+float pdBuyOteHigh = math.max(pdBuy850, pdBuy690)
+bool inPrevDaySellOTE = high >= pdSellOteLow and low <= pdSellOteHigh
+bool inPrevDayBuyOTE = high >= pdBuyOteLow and low <= pdBuyOteHigh
+
+int fractalBuyAlign = (dD == 1 ? 1 : 0) + ((d240 == 1 or d180 == 1) ? 1 : 0) + (d60 == 1 ? 1 : 0) + (d15 == 1 ? 1 : 0) + (d5 == 1 ? 1 : 0)
+int fractalSellAlign = (dD == -1 ? 1 : 0) + ((d240 == -1 or d180 == -1) ? 1 : 0) + (d60 == -1 ? 1 : 0) + (d15 == -1 ? 1 : 0) + (d5 == -1 ? 1 : 0)
+
+bool fractalBuyAligned = fractalBuyAlign >= fractalMinAlign
+bool fractalSellAligned = fractalSellAlign >= fractalMinAlign
+bool fractalMacroBuy = (dD == 1 or d240 == 1 or d180 == 1) and pdDiscount
+bool fractalMacroSell = (dD == -1 or d240 == -1 or d180 == -1) and pdPremium
+bool fractalSetupBuy = fractalMacroBuy and (d60 == 1 or d15 == 1) and (pdlRaid or inPrevDayBuyOTE or pdDiscount)
+bool fractalSetupSell = fractalMacroSell and (d60 == -1 or d15 == -1) and (pdhRaid or inPrevDaySellOTE or pdPremium)
+bool fractalTriggerBuy = fractalSetupBuy and d5 == 1 and (microBosBuy or absorbBuy or seqAbsorbBuy or buyPullbackDying)
+bool fractalTriggerSell = fractalSetupSell and d5 == -1 and (microBosSell or absorbSell or seqAbsorbSell or sellPullbackDying)
+
+float fractalBuyQuality = math.min(100.0, fractalBuyAlign * 14.0 + (pdDiscount ? 10.0 : 0.0) + (pdlRaid ? 12.0 : 0.0) + (inPrevDayBuyOTE ? 8.0 : 0.0))
+float fractalSellQuality = math.min(100.0, fractalSellAlign * 14.0 + (pdPremium ? 10.0 : 0.0) + (pdhRaid ? 12.0 : 0.0) + (inPrevDaySellOTE ? 8.0 : 0.0))
+
+string prevDayPosTxt = pdAboveHigh ? "SOBRE PDH" : pdBelowLow ? "BAJO PDL" : pdPremium ? "PREMIUM > 50%" : pdDiscount ? "DISCOUNT < 50%" : "EQ 50%"
+string prevDayRaidTxt = pdlRaid ? "PDL RAID ✓" : pdhRaid ? "PDH RAID ✓" : pdhReclaim ? "PDH RECLAIM" : pdlReclaim ? "PDL RECLAIM" : "SIN RAID"
+string fractalBiasTxt = fractalBuyAligned and not fractalSellAligned ? "BUY" : fractalSellAligned and not fractalBuyAligned ? "SELL" : fractalMacroBuy ? "BUY PREPARANDO" : fractalMacroSell ? "SELL PREPARANDO" : "MIXTO"
+string fractalActionTxt = fractalTriggerBuy ? "FRACTAL BUY CONFIRMADO" : fractalTriggerSell ? "FRACTAL SELL CONFIRMADO" : fractalSetupBuy ? "ESPERAR TRIGGER M5 BUY" : fractalSetupSell ? "ESPERAR TRIGGER M5 SELL" : "ESPERAR RANGO + ALINEACIÓN"
+
+float fractalBuyBoost = fractalBuyAligned ? 6.0 : fractalMacroBuy ? 3.0 : fractalSellAligned ? -7.0 : 0.0
+float fractalSellBoost = fractalSellAligned ? 6.0 : fractalMacroSell ? 3.0 : fractalBuyAligned ? -7.0 : 0.0
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V50 — ICT FORMAL CORE / PINE-SAFE
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// A) BSL / SSL FORMAL
+float ictBSL = externalEQH and not na(lastExtPH) ? math.max(lastExtPH, prevExtPH) : externalLiquidityAbove
+float ictSSL = externalEQL and not na(lastExtPL) ? math.min(lastExtPL, prevExtPL) : externalLiquidityBelow
+bool ictBslRaid = not na(ictBSL) and high > ictBSL and close < ictBSL
+bool ictSslRaid = not na(ictSSL) and low < ictSSL and close > ictSSL
+bool ictBslPending = not na(ictBSL) and high < ictBSL
+bool ictSslPending = not na(ictSSL) and low > ictSSL
+
+// B) DEALING RANGES ANIDADOS
+float ictExtHigh = math.max(h3High, macroHighH4)
+float ictExtLow = math.min(h3Low, macroLowH4)
+float ictExtRange = math.max(ictExtHigh - ictExtLow, syminfo.mintick)
+float ictExtEq = ictExtLow + ictExtRange * 0.50
+bool ictExtPremium = close > ictExtEq
+bool ictExtDiscount = close < ictExtEq
+
+float ictIntHigh = ta.highest(high[1], ictDealingLen)
+float ictIntLow = ta.lowest(low[1], ictDealingLen)
+float ictIntRange = math.max(ictIntHigh - ictIntLow, syminfo.mintick)
+float ictIntEq = ictIntLow + ictIntRange * 0.50
+bool ictIntPremium = close > ictIntEq
+bool ictIntDiscount = close < ictIntEq
+
+// C) OTE
+float ictBuyOteLow = ictIntHigh - ictIntRange * ictOteMax
+float ictBuyOteHigh = ictIntHigh - ictIntRange * ictOteMin
+float ictSellOteLow = ictIntLow + ictIntRange * ictOteMin
+float ictSellOteHigh = ictIntLow + ictIntRange * ictOteMax
+bool ictInBuyOTE = low <= ictBuyOteHigh and high >= ictBuyOteLow
+bool ictInSellOTE = high >= ictSellOteLow and low <= ictSellOteHigh
+
+// D) DISPLACEMENT FORMAL
+bool ictBullDisplacement = close > open and body >= atr * ictDispAtr and close > high[1] and closeNearHigh
+bool ictBearDisplacement = close < open and body >= atr * ictDispAtr and close < low[1] and closeNearLow
+
+// E) MSS / CHoCH FORMAL
+float ictSwingHigh = ta.highest(high[1], ictMssLookback)
+float ictSwingLow = ta.lowest(low[1], ictMssLookback)
+bool ictBullMSS = close > ictSwingHigh and ictBullDisplacement and (internalSweepDown or ictSslRaid or sweepDown)
+bool ictBearMSS = close < ictSwingLow and ictBearDisplacement and (internalSweepUp or ictBslRaid or sweepUp)
+bool ictBullChoch = close > ictSwingHigh and (motherBias == -1 or d180 == -1 or d240 == -1)
+bool ictBearChoch = close < ictSwingLow and (motherBias == 1 or d180 == 1 or d240 == 1)
+
+// F) PD ARRAY HIERARCHY
+bool ictBullPdOB = bullObTouch and ictIntDiscount
+bool ictBearPdOB = bearObTouch and ictIntPremium
+bool ictBullPdFVG = bullFvgActive and ictIntDiscount
+bool ictBearPdFVG = bearFvgActive and ictIntPremium
+bool ictBullPdBreaker = bullBreaker and ictIntDiscount
+bool ictBearPdBreaker = bearBreaker and ictIntPremium
+bool ictBullPdOTE = ictInBuyOTE and ictIntDiscount
+bool ictBearPdOTE = ictInSellOTE and ictIntPremium
+
+int ictBullPdCount = (ictBullPdOB ? 1 : 0) + (ictBullPdFVG ? 1 : 0) + (ictBullPdBreaker ? 1 : 0) + (ictBullPdOTE ? 1 : 0)
+int ictBearPdCount = (ictBearPdOB ? 1 : 0) + (ictBearPdFVG ? 1 : 0) + (ictBearPdBreaker ? 1 : 0) + (ictBearPdOTE ? 1 : 0)
+
+// G) KILLZONES / TIME QUALITY
+bool ictInLondon = not na(time(timeframe = timeframe.period, session = ictLondon, timezone = ictTz))
+bool ictInNewYork = not na(time(timeframe = timeframe.period, session = ictNewYork, timezone = ictTz))
+bool ictInLondonClose = not na(time(timeframe = timeframe.period, session = ictLondonClose, timezone = ictTz))
+bool ictInKillzone = ictInLondon or ictInNewYork or ictInLondonClose
+float ictSessionQuality = not ictUseKillzone ? 100.0 : ictInKillzone ? 100.0 : 58.0
+string ictSessionTxt = ictInLondon ? "LONDON KZ" : ictInNewYork ? "NEW YORK KZ" : ictInLondonClose ? "LONDON CLOSE" : "FUERA KZ"
+
+// I) CALIDAD ICT INDEPENDIENTE — V73: indentación de continuación unificada (5 espacios).
+float ictBuyQualityRaw = (ictExtDiscount ? 16.0 : 0.0) +
+     (ictIntDiscount ? 12.0 : 0.0) +
+     (ictSslRaid ? 18.0 : 0.0) +
+     (ictBullMSS ? 18.0 : ictBullChoch ? 10.0 : 0.0) +
+     (ictBullDisplacement ? 12.0 : 0.0) +
+     (ictBullPdCount >= 2 ? 16.0 : ictBullPdCount == 1 ? 8.0 : 0.0) +
+     (ictInBuyOTE ? 8.0 : 0.0)
+
+float ictSellQualityRaw = (ictExtPremium ? 16.0 : 0.0) +
+     (ictIntPremium ? 12.0 : 0.0) +
+     (ictBslRaid ? 18.0 : 0.0) +
+     (ictBearMSS ? 18.0 : ictBearChoch ? 10.0 : 0.0) +
+     (ictBearDisplacement ? 12.0 : 0.0) +
+     (ictBearPdCount >= 2 ? 16.0 : ictBearPdCount == 1 ? 8.0 : 0.0) +
+     (ictInSellOTE ? 8.0 : 0.0)
+
+float ictBuyQuality = math.min(100.0, ictBuyQualityRaw * ictSessionQuality / 100.0)
+float ictSellQuality = math.min(100.0, ictSellQualityRaw * ictSessionQuality / 100.0)
+
+// J) BIAS ICT
+bool ictBiasBuy = (motherBias == 1 or d180 == 1 or d240 == 1) and ictExtDiscount and not macroNoBuyTop
+bool ictBiasSell = (motherBias == -1 or d180 == -1 or d240 == -1) and ictExtPremium and not macroNoSellBottom
+
+string ictStructureTxt = ictBullMSS ? "MSS BUY ✓" : ictBearMSS ? "MSS SELL ✓" : ictBullChoch ? "CHoCH BUY" : ictBearChoch ? "CHoCH SELL" : "ESTRUCTURA PENDIENTE"
+string ictLiquidityTxt = ictSslRaid ? "SSL RAID ✓" : ictBslRaid ? "BSL RAID ✓" : ictSslPending and ictBiasBuy ? "SSL PENDIENTE" : ictBslPending and ictBiasSell ? "BSL PENDIENTE" : "LIQ MAP ACTIVO"
+string ictOteTxt = ictInBuyOTE ? "BUY OTE ✓" : ictInSellOTE ? "SELL OTE ✓" : "FUERA OTE"
+
+// K) SETUP / GATILLO ICT
+bool ictBuySetupReady = ictBiasBuy and ictBuyQuality >= 55 and (ictSslRaid or internalSweepDown or externalSweepLow) and ictBullPdCount >= 1
+bool ictSellSetupReady = ictBiasSell and ictSellQuality >= 55 and (ictBslRaid or internalSweepUp or externalSweepHigh) and ictBearPdCount >= 1
+bool ictBuyTrigger = ictBuySetupReady and (ictBullMSS or ictBullChoch) and ictBullDisplacement and buyNoFomo
+bool ictSellTrigger = ictSellSetupReady and (ictBearMSS or ictBearChoch) and ictBearDisplacement and sellNoFomo
+
+string ictActionTxt = ictBuyTrigger ? "ICT BUY CONFIRMADO" : ictSellTrigger ? "ICT SELL CONFIRMADO" : ictBuySetupReady ? "ESPERAR MSS/DISPLACEMENT BUY" : ictSellSetupReady ? "ESPERAR MSS/DISPLACEMENT SELL" : "ESPERAR LIQUIDEZ + PD ARRAY"
+
+// L) INVALIDACIÓN ICT (amplia; se usa solo para juzgar si un retroceso sigue siendo retroceso)
+float ictBuyInvalidationBase = math.min(ictIntLow, nz(bullObLow, ictIntLow))
+float ictSellInvalidationBase = math.max(ictIntHigh, nz(bearObHigh, ictIntHigh))
+float ictBuyInvalidation = not na(ictSSL) ? math.min(ictSSL, ictBuyInvalidationBase) - atr * 0.10 : ictBuyInvalidationBase - atr * 0.10
+float ictSellInvalidation = not na(ictBSL) ? math.max(ictBSL, ictSellInvalidationBase) + atr * 0.10 : ictSellInvalidationBase + atr * 0.10
+
+//━━━━━━━━━━━━━━━━━━
+// SCORE
+//━━━━━━━━━━━━━━━━━━
+float buyScore = 0.0
+buyScore += inBuyZone ? 14.0 : 0.0
+buyScore += absorbBuy ? 20.0 : 0.0
+buyScore += seqAbsorbBuy ? 10.0 : 0.0
+buyScore += buyNoFomo ? 12.0 : -22.0
+buyScore += microBosBuy or buyImpulse ? 14.0 : 0.0
+buyScore += buyContinuation ? 16.0 : 0.0
+buyScore += buyPressure ? 10.0 : 0.0
+buyScore += pocDefendedBuy ? 8.0 : 0.0
+buyScore += deltaAccelerationBuy ? 6.0 : 0.0
+buyScore += smartBuyAllowed ? 12.0 : 0.0
+buyScore += macroEntryBuy ? 14.0 : 0.0
+buyScore += macroManipulationBuy ? 10.0 : 0.0
+buyScore += macroNoBuyTop ? -22.0 : 0.0
+buyScore += macroBiasBuy * 0.16
+buyScore += lateBuyExhaustion or antiTopBuy ? -18.0 : 0.0
+buyScore += adxWake ? 5.0 : 0.0
+buyScore += mtfBuy * 0.30
+buyScore += institutionalBuyBoost
+buyScore += poiBuyConfluence ? 6.0 : 0.0
+buyScore += ictBuyQuality * 0.10
+buyScore += ictBuyTrigger ? 8.0 : 0.0
+buyScore += fractalBuyBoost
+buyScore += fractalTriggerBuy ? 5.0 : 0.0
+buyScore := math.max(0.0, math.min(100.0, buyScore))
+
+float sellScore = 0.0
+sellScore += inSellZone ? 14.0 : 0.0
+sellScore += absorbSell ? 20.0 : 0.0
+sellScore += seqAbsorbSell ? 10.0 : 0.0
+sellScore += sellNoFomo ? 12.0 : -22.0
+sellScore += microBosSell or sellImpulse ? 14.0 : 0.0
+sellScore += sellContinuation ? 16.0 : 0.0
+sellScore += sellPressure ? 10.0 : 0.0
+sellScore += pocDefendedSell ? 8.0 : 0.0
+sellScore += deltaAccelerationSell ? 6.0 : 0.0
+sellScore += smartSellAllowed ? 12.0 : 0.0
+sellScore += macroEntrySell ? 14.0 : 0.0
+sellScore += macroManipulationSell ? 10.0 : 0.0
+sellScore += macroNoSellBottom ? -22.0 : 0.0
+sellScore += macroBiasSell * 0.16
+sellScore += lateSellExhaustion or antiBottomSell ? -18.0 : 0.0
+sellScore += adxWake ? 5.0 : 0.0
+sellScore += mtfSell * 0.30
+sellScore += institutionalSellBoost
+sellScore += poiSellConfluence ? 6.0 : 0.0
+sellScore += ictSellQuality * 0.10
+sellScore += ictSellTrigger ? 8.0 : 0.0
+sellScore += fractalSellBoost
+sellScore += fractalTriggerSell ? 5.0 : 0.0
+sellScore := math.max(0.0, math.min(100.0, sellScore))
+
+//━━━━━━━━━━━━━━━━━━
+// ANTICIPACIÓN REAL DE IMPULSO
+//━━━━━━━━━━━━━━━━━━
+preBuyScore = 0.0
+preBuyScore += compression ? 18.0 : 0.0
+preBuyScore += sweepDown ? 20.0 : 0.0
+preBuyScore += absorbBuy ? 20.0 : 0.0
+preBuyScore += seqAbsorbBuy ? 12.0 : 0.0
+preBuyScore += pocDefendedBuy ? 12.0 : 0.0
+preBuyScore += buyPressure ? 10.0 : 0.0
+preBuyScore += deltaAccelerationBuy ? 8.0 : 0.0
+preBuyScore += adxWake ? 8.0 : 0.0
+preBuyScore += smartBuyAllowed ? 14.0 : 0.0
+preBuyScore += macroEntryBuy ? 12.0 : 0.0
+preBuyScore += mtfBuy * 0.16
+preBuyScore := math.max(0.0, math.min(100.0, preBuyScore))
+
+preSellScore = 0.0
+preSellScore += compression ? 18.0 : 0.0
+preSellScore += sweepUp ? 20.0 : 0.0
+preSellScore += absorbSell ? 20.0 : 0.0
+preSellScore += seqAbsorbSell ? 12.0 : 0.0
+preSellScore += pocDefendedSell ? 12.0 : 0.0
+preSellScore += sellPressure ? 10.0 : 0.0
+preSellScore += deltaAccelerationSell ? 8.0 : 0.0
+preSellScore += adxWake ? 8.0 : 0.0
+preSellScore += smartSellAllowed ? 14.0 : 0.0
+preSellScore += macroEntrySell ? 12.0 : 0.0
+preSellScore += mtfSell * 0.16
+preSellScore := math.max(0.0, math.min(100.0, preSellScore))
+
+preBuyLoad = (compression or sweepDown or absorbBuy or seqAbsorbBuy or pocDefendedBuy or smartBuyAllowed or macroEntryBuy) and (buyPressure or deltaAccelerationBuy or adxWake) and (d5 == 1 or d15 == 1 or mtfBuy >= mtfSell)
+preSellLoad = (compression or sweepUp or absorbSell or seqAbsorbSell or pocDefendedSell or smartSellAllowed or macroEntrySell) and (sellPressure or deltaAccelerationSell or adxWake) and (d5 == -1 or d15 == -1 or mtfSell >= mtfBuy)
+
+preBuyArming = preBuyLoad and preBuyScore >= 58 and not buyImpulse
+preSellArming = preSellLoad and preSellScore >= 58 and not sellImpulse
+preDirection = preBuyScore > preSellScore + 8 ? 1 : preSellScore > preBuyScore + 8 ? -1 : 0
+preImpulseNow = preDirection == 1 ? preBuyArming : preDirection == -1 ? preSellArming : false
+
+rawDir = buyScore > sellScore + masterGap ? 1 : sellScore > buyScore + masterGap ? -1 : 0
+
+//━━━━━━━━━━━━━━━━━━
+// HOLD ESTABLE — V73: EL CORE PUEDE CAMBIAR Y VOLVER A NEUTRO
+// Problema V72: la reversa exigía estructura + displacement + barrida EN LA MISMA VELA
+// y dos velas consecutivas así. En la práctica masterDir quedaba pegado para siempre.
+// V73:
+//  - La barrida vale si ocurrió en las últimas `reverseRaidBars` velas.
+//  - Las confirmaciones se cuentan dentro de una ventana, no consecutivas.
+//  - Si el CORE pierde ventaja durante `neutralResetBars` velas, vuelve a NEUTRO.
+//━━━━━━━━━━━━━━━━━━
+var int masterDir = 0
+var int holdBar = na
+
+barsInDir = na(holdBar) ? 999 : bar_index - holdBar
+
+candidateBuy = rawDir == 1 and buyScore >= minEntrySoft and (buyContinuation or absorbBuy or seqAbsorbBuy or pocDefendedBuy or buyImpulse or smartBuyAllowed or macroEntryBuy)
+candidateSell = rawDir == -1 and sellScore >= minEntrySoft and (sellContinuation or absorbSell or seqAbsorbSell or pocDefendedSell or sellImpulse or smartSellAllowed or macroEntrySell)
+
+internalWickBreakBuy  = high > internalHigh and close <= internalHigh
+internalWickBreakSell = low < internalLow and close >= internalLow
+internalCloseBreakBuy  = close > internalHigh
+internalCloseBreakSell = close < internalLow
+
+swingCloseBreakBuy  = close > ictSwingHigh
+swingCloseBreakSell = close < ictSwingLow
+
+raidBuyRecent  = ta.barssince(ictSslRaid or externalSweepLow or internalSweepDown or sweepDown) <= reverseRaidBars
+raidSellRecent = ta.barssince(ictBslRaid or externalSweepHigh or internalSweepUp or sweepUp) <= reverseRaidBars
+
+reverseBuyEvidence = (swingCloseBreakBuy or ictBullMSS or ictBullChoch) and (ictBullDisplacement or bullDisplacement) and raidBuyRecent and buyScore >= minEntryStrong and buyScore > sellScore + masterGap
+reverseSellEvidence = (swingCloseBreakSell or ictBearMSS or ictBearChoch) and (ictBearDisplacement or bearDisplacement) and raidSellRecent and sellScore >= minEntryStrong and sellScore > buyScore + masterGap
+
+emergencyBuyReversal = reverseBuyEvidence and buyScore >= 92 and buyScore > sellScore + masterGap + 12 and (d15 == 1 or d60 == 1)
+emergencySellReversal = reverseSellEvidence and sellScore >= 92 and sellScore > buyScore + masterGap + 12 and (d15 == -1 or d60 == -1)
+
+revBuyRecent  = math.sum(reverseBuyEvidence ? 1 : 0, reverseWindowBars)
+revSellRecent = math.sum(reverseSellEvidence ? 1 : 0, reverseWindowBars)
+
+// Pérdida de ventaja del CORE vigente (se evalúa con el masterDir de la vela anterior).
+coreEdgeLost = masterDir == 1 ? not (buyScore > sellScore) and not buyContinuation : masterDir == -1 ? not (sellScore > buyScore) and not sellContinuation : false
+coreEdgeLostBars = ta.barssince(not coreEdgeLost)
+neutralReset = not na(coreEdgeLostBars) and coreEdgeLostBars >= neutralResetBars
+
+if masterDir == 0
+    if candidateBuy
+        masterDir := 1
+        holdBar := bar_index
+    else if candidateSell
+        masterDir := -1
+        holdBar := bar_index
+else if masterDir == 1
+    if emergencySellReversal or (barsInDir >= holdBarsMin and revSellRecent >= confirmReverseBars)
+        masterDir := -1
+        holdBar := bar_index
+    else if barsInDir >= holdBarsMin and neutralReset
+        masterDir := 0
+        holdBar := na
+else if masterDir == -1
+    if emergencyBuyReversal or (barsInDir >= holdBarsMin and revBuyRecent >= confirmReverseBars)
+        masterDir := 1
+        holdBar := bar_index
+    else if barsInDir >= holdBarsMin and neutralReset
+        masterDir := 0
+        holdBar := na
+
+conflict = masterDir == 0
+
+//━━━━━━━━━━━━━━━━━━
+// V61 — MARKET INTELLIGENCE: RETROCESO / CONTINUACIÓN / EVENTO
+//━━━━━━━━━━━━━━━━━━
+atrBase50 = ta.sma(atr, 50)
+volRatioV61 = atrBase50 > 0 ? atr / atrBase50 : 1.0
+volAbnormalV61 = volRatioV61 >= volEventAtrMult
+volExtremeV61 = volRatioV61 >= volEventAtrMult * 1.25
+eventBlockV61 = manualNewsRisk or volExtremeV61
+
+corePullbackBuy = masterDir == 1 and not reverseSellEvidence and (d5 == -1 or d15 == -1 or close < ema9 or sellPressure or internalWickBreakSell) and close > ictBuyInvalidation
+corePullbackSell = masterDir == -1 and not reverseBuyEvidence and (d5 == 1 or d15 == 1 or close > ema9 or buyPressure or internalWickBreakBuy) and close < ictSellInvalidation
+pullbackActiveV61 = corePullbackBuy or corePullbackSell
+
+pullbackLowV61 = masterDir == 1 ? math.min(buyPullFrom, buyPullTo) : masterDir == -1 ? math.min(sellPullFrom, sellPullTo) : na
+pullbackHighV61 = masterDir == 1 ? math.max(buyPullFrom, buyPullTo) : masterDir == -1 ? math.max(sellPullFrom, sellPullTo) : na
+pullbackDepthV61 = masterDir == 1 ? math.max(0.0, ema9 - close) / math.max(atr, syminfo.mintick) : masterDir == -1 ? math.max(0.0, close - ema9) / math.max(atr, syminfo.mintick) : 0.0
+pullbackClassV61 = pullbackDepthV61 < 0.45 ? "LEVE" : pullbackDepthV61 < 0.95 ? "MEDIO" : "PROFUNDO"
+
+continuationBuyV61 = masterDir == 1 and not reverseSellEvidence and (buyContinuation or microBosBuy or internalCloseBreakBuy) and (buyPressure or deltaAccelerationBuy)
+continuationSellV61 = masterDir == -1 and not reverseBuyEvidence and (sellContinuation or microBosSell or internalCloseBreakSell) and (sellPressure or deltaAccelerationSell)
+continuationV61 = continuationBuyV61 or continuationSellV61
+
+marketStateV61 = conflict ? "RANGO / CONFLICTO" : reverseBuyEvidence or reverseSellEvidence ? "REVERSA EN CONFIRMACIÓN" : pullbackActiveV61 ? (masterDir == 1 ? "RETROCESO BAJISTA" : "RETROCESO ALCISTA") : continuationV61 ? "CONTINUACIÓN" : "CORE VIGENTE"
+coreTxtV61 = masterDir == 1 ? "BUY SWING" : masterDir == -1 ? "SELL SWING" : "NEUTRO"
+volTxtV61 = volExtremeV61 ? "EXTREMA" : volAbnormalV61 ? "ALTA" : "NORMAL"
+
+//━━━━━━━━━━━━━━━━━━
+// PLAN / TEXTOS
+//━━━━━━━━━━━━━━━━━━
+stars(score) =>
+    score >= 92 ? "★★★★★" : score >= 84 ? "★★★★" : score >= 74 ? "★★★" : score >= 60 ? "★★" : score >= 45 ? "★" : "-"
+
+starsNum(score) =>
+    score >= 92 ? "5/5" : score >= 84 ? "4/5" : score >= 74 ? "3/5" : score >= 60 ? "2/5" : score >= 45 ? "1/5" : "0/5"
+
+scoreShown = masterDir == 1 ? buyScore : masterDir == -1 ? sellScore : math.max(buyScore, sellScore)
+
+entryFromRaw = masterDir == 1 ? (buyContinuation ? buyPullFrom : buyZoneFrom) : masterDir == -1 ? (sellContinuation ? sellPullFrom : sellZoneFrom) : na
+entryToRaw   = masterDir == 1 ? (buyContinuation ? buyPullTo : buyZoneTo) : masterDir == -1 ? (sellContinuation ? sellPullTo : sellZoneTo) : na
+
+entryLow = na(entryFromRaw) or na(entryToRaw) ? na : math.min(entryFromRaw, entryToRaw)
+entryHigh = na(entryFromRaw) or na(entryToRaw) ? na : math.max(entryFromRaw, entryToRaw)
+priceInsideEntry = not na(entryLow) and close >= entryLow and close <= entryHigh
+
+// V73: SL ESTRUCTURAL CERCANO Y ACOTADO.
+// V72 tomaba el nivel más lejano de todos (incluida la liquidez externa de ~1 semana),
+// así que el SL de un scalp en M5 quedaba bajo el mínimo semanal.
+// Ahora: mínimo interno (8 velas) u Order Block fresco si está cerca,
+// nunca más cerca que slAtr ni más lejos que slMaxAtr.
+f_slBuy(_zoneLow) =>
+    structLvl = math.min(_zoneLow - atr * 0.35, internalLow - atr * 0.12)
+    obLvl = bullObFresh and bullObLow < _zoneLow and _zoneLow - bullObLow <= atr * slMaxAtr ? bullObLow - atr * 0.10 : structLvl
+    lvl = math.min(structLvl, obLvl)
+    lvl := math.max(lvl, _zoneLow - atr * slMaxAtr)
+    math.min(lvl, _zoneLow - atr * slAtr)
+
+f_slSell(_zoneHigh) =>
+    structLvl = math.max(_zoneHigh + atr * 0.35, internalHigh + atr * 0.12)
+    obLvl = bearObFresh and bearObHigh > _zoneHigh and bearObHigh - _zoneHigh <= atr * slMaxAtr ? bearObHigh + atr * 0.10 : structLvl
+    lvl = math.max(structLvl, obLvl)
+    lvl := math.min(lvl, _zoneHigh + atr * slMaxAtr)
+    math.max(lvl, _zoneHigh + atr * slAtr)
+
+// Objetivos estructurales a partir de una zona dada (se reutiliza en el PLAN FINAL).
+f_tpBuy(_zoneHigh) =>
+    t1 = math.max(_zoneHigh + atr * 0.60, internalHigh > _zoneHigh ? internalHigh : _zoneHigh + atr * tp1Atr)
+    t2 = math.max(t1 + atr * 0.45, externalLiquidityAbove > t1 ? externalLiquidityAbove : _zoneHigh + atr * tp2Atr)
+    t3 = math.max(t2 + atr * 0.65, _zoneHigh + atr * tp3Atr)
+    t4 = math.max(t3 + atr * 0.65, _zoneHigh + atr * tp4Atr)
+    t5 = math.max(t4 + atr * 0.65, _zoneHigh + atr * tp5Atr)
+    [t1, t2, t3, t4, t5]
+
+f_tpSell(_zoneLow) =>
+    t1 = math.min(_zoneLow - atr * 0.60, internalLow < _zoneLow ? internalLow : _zoneLow - atr * tp1Atr)
+    t2 = math.min(t1 - atr * 0.45, externalLiquidityBelow < t1 ? externalLiquidityBelow : _zoneLow - atr * tp2Atr)
+    t3 = math.min(t2 - atr * 0.65, _zoneLow - atr * tp3Atr)
+    t4 = math.min(t3 - atr * 0.65, _zoneLow - atr * tp4Atr)
+    t5 = math.min(t4 - atr * 0.65, _zoneLow - atr * tp5Atr)
+    [t1, t2, t3, t4, t5]
+
+validNoFomo = masterDir == 1 ? buyNoFomo : masterDir == -1 ? sellNoFomo : false
+reactionOK = masterDir == 1 ? (absorbBuy or seqAbsorbBuy or buyPullbackDying or pocDefendedBuy or buyImpulse or smartBuyAllowed or macroEntryBuy) : masterDir == -1 ? (absorbSell or seqAbsorbSell or sellPullbackDying or pocDefendedSell or sellImpulse or smartSellAllowed or macroEntrySell) : false
+
+strongEntry = not conflict and priceInsideEntry and validNoFomo and reactionOK and scoreShown >= minEntryStrong
+softEntry = not conflict and priceInsideEntry and validNoFomo and reactionOK and scoreShown >= minEntrySoft and scoreShown < minEntryStrong
+
+// V48 TRIPLE DECISIÓN: BIAS -> SETUP -> TRIGGER
+locationQuality = masterDir == 1 ? locationBuyQuality : masterDir == -1 ? locationSellQuality : math.max(locationBuyQuality, locationSellQuality)
+biasV48 = motherBias == 1 ? "BUY" : motherBias == -1 ? "SELL" : masterDir == 1 ? "BUY" : masterDir == -1 ? "SELL" : "WAIT"
+
+setupBuyReady = masterDir == 1 and (institutionalBiasBuy or macroDiscount) and locationBuyQuality >= 55 and (poiBuyConfluence or externalSweepLow or internalSweepDown or macroSweepDown)
+setupSellReady = masterDir == -1 and (institutionalBiasSell or macroPremium) and locationSellQuality >= 55 and (poiSellConfluence or externalSweepHigh or internalSweepUp or macroSweepUp)
+
+triggerBuyV48 = setupBuyReady and validNoFomo and (microBosBuy or absorbBuy or seqAbsorbBuy or buyPullbackDying or ictBullMSS or fractalTriggerBuy) and (buyPressure or deltaAccelerationBuy or ictBullDisplacement or fractalTriggerBuy)
+triggerSellV48 = setupSellReady and validNoFomo and (microBosSell or absorbSell or seqAbsorbSell or sellPullbackDying or ictBearMSS or fractalTriggerSell) and (sellPressure or deltaAccelerationSell or ictBearDisplacement or fractalTriggerSell)
+
+setupV48 = setupBuyReady or setupSellReady ? "LISTO" : motherBias != 0 ? "PREPARANDO" : "ESPERAR"
+triggerV48 = triggerBuyV48 ? "BUY CONFIRMADO" : triggerSellV48 ? "SELL CONFIRMADO" : setupBuyReady or setupSellReady ? "PENDIENTE" : "SIN GATILLO"
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V50.3 — LIVE DECISION LAYER (LIGERO)
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var float imxBullLegLow = na
+var float imxBullLegHigh = na
+var float imxBearLegHigh = na
+var float imxBearLegLow = na
+
+if ictBullMSS or ictBullChoch or macroBreakBuy
+    imxBullLegLow := nz(ictSwingLow, low)
+    imxBullLegHigh := high
+if ictBearMSS or ictBearChoch or macroBreakSell
+    imxBearLegHigh := nz(ictSwingHigh, high)
+    imxBearLegLow := low
+
+if not na(imxBullLegHigh) and (motherBias == 1 or masterDir == 1)
+    imxBullLegHigh := math.max(imxBullLegHigh, high)
+if not na(imxBearLegLow) and (motherBias == -1 or masterDir == -1)
+    imxBearLegLow := math.min(imxBearLegLow, low)
+
+imxBullLegRange = not na(imxBullLegLow) and not na(imxBullLegHigh) ? math.max(imxBullLegHigh - imxBullLegLow, syminfo.mintick) : na
+imxBearLegRange = not na(imxBearLegHigh) and not na(imxBearLegLow) ? math.max(imxBearLegHigh - imxBearLegLow, syminfo.mintick) : na
+
+imxBuyFib382 = not na(imxBullLegRange) ? imxBullLegHigh - imxBullLegRange * 0.382 : na
+imxBuyFib500 = not na(imxBullLegRange) ? imxBullLegHigh - imxBullLegRange * 0.500 : na
+imxBuyFib618 = not na(imxBullLegRange) ? imxBullLegHigh - imxBullLegRange * 0.618 : na
+imxBuyFib705 = not na(imxBullLegRange) ? imxBullLegHigh - imxBullLegRange * 0.705 : na
+imxBuyFib786 = not na(imxBullLegRange) ? imxBullLegHigh - imxBullLegRange * 0.786 : na
+
+imxSellFib382 = not na(imxBearLegRange) ? imxBearLegLow + imxBearLegRange * 0.382 : na
+imxSellFib500 = not na(imxBearLegRange) ? imxBearLegLow + imxBearLegRange * 0.500 : na
+imxSellFib618 = not na(imxBearLegRange) ? imxBearLegLow + imxBearLegRange * 0.618 : na
+imxSellFib705 = not na(imxBearLegRange) ? imxBearLegLow + imxBearLegRange * 0.705 : na
+imxSellFib786 = not na(imxBearLegRange) ? imxBearLegLow + imxBearLegRange * 0.786 : na
+
+imxFibTol = atr * 0.12
+imxNearFib(_v) => not na(_v) and low <= _v + imxFibTol and high >= _v - imxFibTol
+imxBuyFibHit = imxNearFib(imxBuyFib382) or imxNearFib(imxBuyFib500) or imxNearFib(imxBuyFib618) or imxNearFib(imxBuyFib705) or imxNearFib(imxBuyFib786)
+imxSellFibHit = imxNearFib(imxSellFib382) or imxNearFib(imxSellFib500) or imxNearFib(imxSellFib618) or imxNearFib(imxSellFib705) or imxNearFib(imxSellFib786)
+
+imxPoiBuyQ = math.min(5, (bullFvgActive ? 1 : 0) + (bullObTouch ? 1 : 0) + (bullBreaker ? 1 : 0) + ((ictInBuyOTE or inPrevDayBuyOTE or imxBuyFibHit) ? 1 : 0) + ((ictSslRaid or externalSweepLow or internalSweepDown) ? 1 : 0))
+imxPoiSellQ = math.min(5, (bearFvgActive ? 1 : 0) + (bearObTouch ? 1 : 0) + (bearBreaker ? 1 : 0) + ((ictInSellOTE or inPrevDaySellOTE or imxSellFibHit) ? 1 : 0) + ((ictBslRaid or externalSweepHigh or internalSweepUp) ? 1 : 0))
+
+imxPoiBuyCandidate = imxPoiBuyQ >= 2
+imxPoiSellCandidate = imxPoiSellQ >= 2
+imxPoiBuyValidated = imxPoiBuyCandidate and (ictSslRaid or externalSweepLow or internalSweepDown) and (absorbBuy or seqAbsorbBuy or pocDefendedBuy or buyPressure)
+imxPoiSellValidated = imxPoiSellCandidate and (ictBslRaid or externalSweepHigh or internalSweepUp) and (absorbSell or seqAbsorbSell or pocDefendedSell or sellPressure)
+imxPoiBuyConfirmed = imxPoiBuyValidated and (ictBullMSS or ictBullChoch or microBosBuy) and (ictBullDisplacement or buyImpulse or rangeExpansion)
+imxPoiSellConfirmed = imxPoiSellValidated and (ictBearMSS or ictBearChoch or microBosSell) and (ictBearDisplacement or sellImpulse or rangeExpansion)
+
+imxShockUpPrev = (rng[1] >= atr[1] * 1.60 or body[1] >= atr[1] * 1.00) and close[1] > open[1]
+imxShockDownPrev = (rng[1] >= atr[1] * 1.60 or body[1] >= atr[1] * 1.00) and close[1] < open[1]
+imxPrevMid = (high[1] + low[1]) * 0.50
+imxFailedBuyContinuation = imxShockUpPrev and (high >= high[1] or ictBslRaid or externalSweepHigh) and close < imxPrevMid and (sellPressure or deltaAccelerationSell)
+imxFailedSellContinuation = imxShockDownPrev and (low <= low[1] or ictSslRaid or externalSweepLow) and close > imxPrevMid and (buyPressure or deltaAccelerationBuy)
+
+imxBuyScoreVelocity = buyScore - nz(buyScore[2], buyScore)
+imxSellScoreVelocity = sellScore - nz(sellScore[2], sellScore)
+imxBiasDecayBuy = imxBuyScoreVelocity <= -10 and imxSellScoreVelocity >= 6
+imxBiasDecaySell = imxSellScoreVelocity <= -10 and imxBuyScoreVelocity >= 6
+
+imxReversalWatchSell = (imxFailedBuyContinuation or imxBiasDecayBuy) and (ictBslRaid or externalSweepHigh or sweepUp)
+imxReversalWatchBuy = (imxFailedSellContinuation or imxBiasDecaySell) and (ictSslRaid or externalSweepLow or sweepDown)
+imxReversalConfirmedSell = imxReversalWatchSell and (ictBearMSS or ictBearChoch or microBosSell) and (ictBearDisplacement or sellImpulse)
+imxReversalConfirmedBuy = imxReversalWatchBuy and (ictBullMSS or ictBullChoch or microBosBuy) and (ictBullDisplacement or buyImpulse)
+
+imxBuyRetrace = not na(imxBullLegRange) ? (imxBullLegHigh - close) / imxBullLegRange : na
+imxSellRetrace = not na(imxBearLegRange) ? (close - imxBearLegLow) / imxBearLegRange : na
+
+imxWavePhase = lateBuyExhaustion and (nearResist or ictBslRaid or externalSweepHigh) ? "W5? AGOT BUY" :
+     lateSellExhaustion and (nearSupport or ictSslRaid or externalSweepLow) ? "W5? AGOT SELL" :
+     imxReversalConfirmedSell ? "ABC/W1? SELL" :
+     imxReversalConfirmedBuy ? "ABC/W1? BUY" :
+     masterDir == 1 and not na(imxBuyRetrace) and imxBuyRetrace >= 0.50 and imxBuyRetrace <= 0.79 ? "W2/W4? RETRO" :
+     masterDir == -1 and not na(imxSellRetrace) and imxSellRetrace >= 0.50 and imxSellRetrace <= 0.79 ? "W2/W4? RETRO" :
+     masterDir == 1 and (ictBullMSS or microBosBuy) and (ictBullDisplacement or rangeExpansion) ? "W3? EXP BUY" :
+     masterDir == -1 and (ictBearMSS or microBosSell) and (ictBearDisplacement or rangeExpansion) ? "W3? EXP SELL" :
+     "ONDA MIXTA"
+
+imxRangeMid = (chHigh + chLow) * 0.50
+imxRangeCenter = inChannel and math.abs(close - imxRangeMid) <= chRange * 0.22
+
+imxSeqMotherBuy = masterDir == 1 and (motherBias == 1 or institutionalBiasBuy or fractalMacroBuy)
+imxSeqMotherSell = masterDir == -1 and (motherBias == -1 or institutionalBiasSell or fractalMacroSell)
+imxSeqPoiBuy = imxPoiBuyQ >= 2
+imxSeqPoiSell = imxPoiSellQ >= 2
+imxSeqLiquidityBuy = ictSslRaid or externalSweepLow or internalSweepDown or sweepDown or imxPoiBuyValidated
+imxSeqLiquiditySell = ictBslRaid or externalSweepHigh or internalSweepUp or sweepUp or imxPoiSellValidated
+imxSeqStructureBuy = ictBullMSS or ictBullChoch or microBosBuy or fractalTriggerBuy
+imxSeqStructureSell = ictBearMSS or ictBearChoch or microBosSell or fractalTriggerSell
+imxSeqRetestBuy = priceInsideEntry and (buyPullbackDying or absorbBuy or bullObTouch or bullFvgActive or ictInBuyOTE or imxBuyFibHit)
+imxSeqRetestSell = priceInsideEntry and (sellPullbackDying or absorbSell or bearObTouch or bearFvgActive or ictInSellOTE or imxSellFibHit)
+
+imxSeqBuy = (imxSeqMotherBuy ? 1 : 0) + (imxSeqPoiBuy ? 1 : 0) + (imxSeqLiquidityBuy ? 1 : 0) + (imxSeqStructureBuy ? 1 : 0) + (imxSeqRetestBuy ? 1 : 0)
+imxSeqSell = (imxSeqMotherSell ? 1 : 0) + (imxSeqPoiSell ? 1 : 0) + (imxSeqLiquiditySell ? 1 : 0) + (imxSeqStructureSell ? 1 : 0) + (imxSeqRetestSell ? 1 : 0)
+imxSeqShown = masterDir == 1 ? imxSeqBuy : masterDir == -1 ? imxSeqSell : math.max(imxSeqBuy, imxSeqSell)
+
+imxFirmBuy = masterDir == 1 and imxSeqBuy >= 4 and (triggerBuyV48 or ictBuyTrigger or fractalTriggerBuy) and not imxRangeCenter and validNoFomo and not lateBuyExhaustion and not antiTopBuy
+imxFirmSell = masterDir == -1 and imxSeqSell >= 4 and (triggerSellV48 or ictSellTrigger or fractalTriggerSell) and not imxRangeCenter and validNoFomo and not lateSellExhaustion and not antiBottomSell
+imxArmedBuy = masterDir == 1 and imxSeqBuy >= 3 and setupBuyReady and not imxRangeCenter
+imxArmedSell = masterDir == -1 and imxSeqSell >= 3 and setupSellReady and not imxRangeCenter
+
+strongEntry := strongEntry and (imxFirmBuy or imxFirmSell)
+softEntry := softEntry and not strongEntry and (imxArmedBuy or imxArmedSell)
+
+imxPoiState = masterDir == 1 ? (imxPoiBuyConfirmed ? "POI CONF " + str.tostring(imxPoiBuyQ) + "/5" : imxPoiBuyValidated ? "POI VAL " + str.tostring(imxPoiBuyQ) + "/5" : "POI " + str.tostring(imxPoiBuyQ) + "/5") : masterDir == -1 ? (imxPoiSellConfirmed ? "POI CONF " + str.tostring(imxPoiSellQ) + "/5" : imxPoiSellValidated ? "POI VAL " + str.tostring(imxPoiSellQ) + "/5" : "POI " + str.tostring(imxPoiSellQ) + "/5") : "POI 0/5"
+imxReversalTxt = imxReversalConfirmedBuy ? "REV BUY CONF" : imxReversalConfirmedSell ? "REV SELL CONF" : imxReversalWatchBuy ? "REV BUY WATCH" : imxReversalWatchSell ? "REV SELL WATCH" : "SIN REV"
+
+poiTxt = (masterDir == 1 ? (bullObTouch and bullFvgActive ? "OB+FVG BUY" : bullObTouch ? "OB BUY" : bullFvgActive ? "FVG BUY" : bullBreaker ? "BREAKER BUY" : h3Discount ? "H3 DISC" : "BUSCA POI") : masterDir == -1 ? (bearObTouch and bearFvgActive ? "OB+FVG SELL" : bearObTouch ? "OB SELL" : bearFvgActive ? "FVG SELL" : bearBreaker ? "BREAKER SELL" : h3Premium ? "H3 PREM" : "BUSCA POI") : "SIN POI") + " | " + imxPoiState
+pendingOrderTxt = ictBuyTrigger or triggerBuyV48 ? "BUY / GATILLO CONFIRMADO" : ictSellTrigger or triggerSellV48 ? "SELL / GATILLO CONFIRMADO" : ictBuySetupReady ? "ESPERAR BUY LIMIT EN PD ARRAY/OTE" : ictSellSetupReady ? "ESPERAR SELL LIMIT EN PD ARRAY/OTE" : setupBuyReady ? "ESPERAR BUY LIMIT" : setupSellReady ? "ESPERAR SELL LIMIT" : "SIN ORDEN PENDIENTE"
+
+operationTxt = coreTxtV61
+modoTxt = marketStateV61
+faseTxt = imxWavePhase + " | " + str.tostring(imxSeqShown) + "/5"
+
+retroTxt = pullbackActiveV61 ? pullbackClassV61 + " | " + str.tostring(pullbackLowV61, format.mintick) + " → " + str.tostring(pullbackHighV61, format.mintick) : "SIN RETROCESO ACTIVO"
+
+nearExitTxt = masterDir == 1 and nearResist ? "PROTEGER/CERRAR PARCIAL: RESISTENCIA " + str.tostring(resistStrength) + "%" : masterDir == -1 and nearSupport ? "PROTEGER/CERRAR PARCIAL: SOPORTE " + str.tostring(supportStrength) + "%" : "DEJAR CORRER SI FLOW SIGUE"
+
+protectPartialV61 = (masterDir == 1 and nearResist and resistStrength >= 65) or (masterDir == -1 and nearSupport and supportStrength >= 65) or (pullbackActiveV61 and pullbackDepthV61 >= 0.75)
+manageTxtV61 = eventBlockV61 ? "PROTEGER / NO NUEVA ENTRADA" : protectPartialV61 ? "TOMAR PARCIAL / PROTEGER" : continuationV61 ? "DEJAR CORRER" : pullbackActiveV61 ? "MANTENER CORE / ESPERAR" : "OBSERVAR"
+
+//━━━━━━━━━━━━━━━━━━
+// PLOTS
+//━━━━━━━━━━━━━━━━━━
+plot(ema9, "EMA 9", color=color.new(color.aqua, 0), linewidth=2, display=display.pane)
+plot(ema21, "EMA 21", color=color.new(color.orange, 0), linewidth=2, display=display.pane)
+plot(ema50, "EMA 50", color=color.new(color.fuchsia, 0), linewidth=2, display=display.pane)
+plot(ema200, "EMA 200", color=color.new(color.white, 35), linewidth=2, display=display.pane)
+plot(showPrevDayMap ? pdh : na, "PDH", color=color.new(color.red, 20), linewidth=1, style=plot.style_linebr)
+plot(showPrevDayMap ? pdEq : na, "PD EQ 50%", color=color.new(color.white, 35), linewidth=1, style=plot.style_linebr)
+plot(showPrevDayMap ? pdl : na, "PDL", color=color.new(color.lime, 20), linewidth=1, style=plot.style_linebr)
+
+//━━━━━━━━━━━━━━━━━━
+// V65 — PALETA VIVA PREMIUM
+//━━━━━━━━━━━━━━━━━━
+v63Gold = uiVividV65 ? color.rgb(255,214,64) : color.rgb(235,196,88)
+v63Navy = uiVividV65 ? color.rgb(3,14,29) : color.rgb(5,18,34)
+v63Navy2 = uiVividV65 ? color.rgb(8,31,56) : color.rgb(8,28,48)
+v63Line = uiVividV65 ? color.rgb(25,126,188) : color.rgb(34,77,110)
+v63Cyan = uiVividV65 ? color.rgb(0,229,255) : color.rgb(35,210,255)
+v63Red = uiVividV65 ? color.rgb(255,48,84) : color.rgb(255,72,86)
+v63Green = uiVividV65 ? color.rgb(0,235,155) : color.rgb(31,222,143)
+v63Amber = uiVividV65 ? color.rgb(255,184,42) : color.rgb(255,196,66)
+v63Gray = uiVividV65 ? color.rgb(174,192,212) : color.rgb(138,154,171)
+v65Blue = color.rgb(62,138,255)
+v65Purple = color.rgb(181,93,255)
+
+uiMobileV65 = uiDeviceV65 == "MÓVIL"
+uiDesktopV65 = uiDeviceV65 == "ESCRITORIO"
+
+f_barV63(pct) =>
+    p = math.max(0.0, math.min(100.0, pct))
+    p >= 90 ? "██████████" :
+     p >= 80 ? "█████████░" :
+     p >= 70 ? "████████░░" :
+     p >= 60 ? "███████░░░" :
+     p >= 50 ? "██████░░░░" :
+     p >= 40 ? "█████░░░░░" :
+     p >= 30 ? "████░░░░░░" :
+     p >= 20 ? "███░░░░░░░" :
+     "██░░░░░░░░"
+
+f_tfBgV63(d) =>
+    d == 1 ? color.new(v63Green, 78) : d == -1 ? color.new(v63Red, 78) : color.new(v63Gray, 82)
+
+//━━━━━━━━━━━━━━━━━━
+// CAMBIO REAL / RETROCESO / ESPACIO OPERATIVO
+// V73: el cambio de CORE se detecta con masterDir[1]. En V72 dependía de una
+// variable que solo se actualizaba en la última vela, así que en histórico nunca disparaba.
+//━━━━━━━━━━━━━━━━━━
+masterDirPrev = masterDir[1]
+rawChangeTrend = masterDir != 0 and masterDirPrev != 0 and masterDir != masterDirPrev
+realSellChange = rawChangeTrend and masterDir == -1 and sellScore > buyScore + masterGap and (microBosSell or absorbSell or trapSell or sellContinuation) and (d5 == -1 or d15 == -1 or mtfSell > mtfBuy) and sellNoFomo
+realBuyChange  = rawChangeTrend and masterDir == 1 and buyScore > sellScore + masterGap and (microBosBuy or absorbBuy or trapBuy or buyContinuation) and (d5 == 1 or d15 == 1 or mtfBuy > mtfSell) and buyNoFomo
+changeTrendNow = realBuyChange or realSellChange
+
+falseChangeWatch = rawChangeTrend and not changeTrendNow
+retroNow = falseChangeWatch or (masterDir == 1 ? buyPullbackDying : masterDir == -1 ? sellPullbackDying : false)
+closeNow = str.contains(nearExitTxt, "PROTEGER") or str.contains(nearExitTxt, "CERRAR")
+
+preventBuyWatch = supportTouch and not strongEntry and not softEntry and not absorbBuy and not buyContinuation and not closeNow and (d5 == 1 or d15 == 1 or mtfBuy >= mtfSell)
+preventSellWatch = resistTouch and not strongEntry and not softEntry and not absorbSell and not sellContinuation and not closeNow and (d5 == -1 or d15 == -1 or mtfSell >= mtfBuy)
+preventNow = preventBuyWatch or preventSellWatch
+
+freeSpaceBuyAtr  = atr > 0 ? math.max(0.0, sellZoneFrom - close) / atr : 999.0
+freeSpaceSellAtr = atr > 0 ? math.max(0.0, close - buyZoneTo) / atr : 999.0
+
+buyStrongResistanceAhead = masterDir == 1 and nearResist and resistStrength >= 70 and not microBosBuy
+sellStrongSupportAhead   = masterDir == -1 and nearSupport and supportStrength >= 70 and not microBosSell
+
+buyNoOperationalSpace  = masterDir == 1 and freeSpaceBuyAtr <= 0.85 and resistStrength >= 65 and not microBosBuy
+sellNoOperationalSpace = masterDir == -1 and freeSpaceSellAtr <= 0.85 and supportStrength >= 65 and not microBosSell
+
+buyWaitContinuation = (buyStrongResistanceAhead or buyNoOperationalSpace or antiTopBuy) and not strongEntry and not changeTrendNow
+sellWaitContinuation = (sellStrongSupportAhead or sellNoOperationalSpace or antiBottomSell) and not strongEntry and not changeTrendNow
+
+lateralWait = inChannel and compression and math.abs(buyScore - sellScore) <= masterGap and not strongEntry and not softEntry
+noSpaceWait = buyWaitContinuation or sellWaitContinuation or lateralWait
+
+preNow = preImpulseNow and not strongEntry and not softEntry and not closeNow and not changeTrendNow and not preventNow and not noSpaceWait
+runnerNow = not strongEntry and not softEntry and not preNow and not preventNow and not retroNow and not closeNow and not changeTrendNow and not conflict and reactionOK and validNoFomo
+
+zoneDistLiveV65 = na(entryLow) or na(entryHigh) ? atr * 10.0 : close < entryLow ? entryLow - close : close > entryHigh ? close - entryHigh : 0.0
+zoneProxPctV65 = math.round(math.max(0.0, math.min(100.0, 100.0 - zoneDistLiveV65 / math.max(atr * 1.50, syminfo.mintick) * 100.0)))
+reactionStrongV65 = reactionOK and scoreShown >= 76 and (buyContinuation or sellContinuation or runnerNow or strongEntry)
+reactionWeakV65 = reactionOK and not reactionStrongV65
+reactionTxtV65 = reactionStrongV65 ? "FUERTE" : reactionWeakV65 ? "DÉBIL" : "ESPERANDO"
+reactionColorV65 = reactionStrongV65 ? v63Green : reactionWeakV65 ? v63Amber : v63Gray
+
+//━━━━━━━━━━━━━━━━━━
+// V41 — PRECISIÓN: VELOCIDAD / EXPLOSIÓN / CONTINUACIÓN REAL
+// V73: se conserva solo lo que consumen paneles y la capa V72.
+//━━━━━━━━━━━━━━━━━━
+tickVelocity = math.abs(close - close[1]) / math.max(atr, syminfo.mintick)
+tickVelocityFast = ta.ema(tickVelocity, 3)
+tickVelocitySlow = ta.ema(tickVelocity, 12)
+
+microCompression = ta.stdev(close, 8) < ta.stdev(close, 21) * 0.72
+explosivePressureBuy = tickVelocityFast > tickVelocitySlow * 1.15 and buyPressure and close > ema9
+explosivePressureSell = tickVelocityFast > tickVelocitySlow * 1.15 and sellPressure and close < ema9
+
+realAccelBuy = explosivePressureBuy and tickVelocityFast > tickVelocitySlow * 1.28 and closeNearHigh and body >= atr * 0.14
+realAccelSell = explosivePressureSell and tickVelocityFast > tickVelocitySlow * 1.28 and closeNearLow and body >= atr * 0.14
+
+continuationBuyScore = 0.0
+continuationBuyScore += buyPressure ? 18.0 : 0.0
+continuationBuyScore += buyContinuation ? 20.0 : 0.0
+continuationBuyScore += explosivePressureBuy ? 16.0 : 0.0
+continuationBuyScore += microBosBuy ? 14.0 : 0.0
+continuationBuyScore += smartBuyAllowed ? 14.0 : 0.0
+continuationBuyScore += microCompression ? 10.0 : 0.0
+continuationBuyScore += deltaAccelerationBuy ? 8.0 : 0.0
+continuationBuyScore := math.min(100.0, continuationBuyScore)
+
+continuationSellScore = 0.0
+continuationSellScore += sellPressure ? 18.0 : 0.0
+continuationSellScore += sellContinuation ? 20.0 : 0.0
+continuationSellScore += explosivePressureSell ? 16.0 : 0.0
+continuationSellScore += microBosSell ? 14.0 : 0.0
+continuationSellScore += smartSellAllowed ? 14.0 : 0.0
+continuationSellScore += microCompression ? 10.0 : 0.0
+continuationSellScore += deltaAccelerationSell ? 8.0 : 0.0
+continuationSellScore := math.min(100.0, continuationSellScore)
+
+continuationReal = masterDir == 1 ? continuationBuyScore : masterDir == -1 ? continuationSellScore : math.max(continuationBuyScore, continuationSellScore)
+
+//━━━━━━━━━━━━━━━━━━
+// V45 — ZONAS DE RETEST (base de las zonas de ejecución)
+//━━━━━━━━━━━━━━━━━━
+retestBuyFrom  = ema21 - atr * 0.22
+retestBuyTo    = ema9  + atr * 0.28
+retestSellFrom = ema9  - atr * 0.28
+retestSellTo   = ema21 + atr * 0.22
+
+entryBuyFrom   = math.min(retestBuyFrom, retestBuyTo)
+entryBuyTo     = math.max(retestBuyFrom, retestBuyTo)
+entrySellFrom  = math.min(retestSellFrom, retestSellTo)
+entrySellTo    = math.max(retestSellFrom, retestSellTo)
+
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V75 — POI INSTITUCIONAL VIVO
+// OB con relevancia de volumen + FVG mitigable (rastreador V48) + Premium/Discount + EQH/EQL.
+// Implementación propia. La autoridad operativa NO usa lookahead.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+atrSafeV75 = math.max(atr, syminfo.mintick)
+
+rangeHighV74 = ta.highest(high, rangeLenV75)
+rangeLowV74 = ta.lowest(low, rangeLenV75)
+rangeSizeV74 = math.max(rangeHighV74 - rangeLowV74, syminfo.mintick)
+rangeMidV74 = rangeLowV74 + rangeSizeV74 * 0.50
+rangePosV74 = (close - rangeLowV74) / rangeSizeV74
+discountV74 = rangePosV74 <= 0.45
+premiumV74 = rangePosV74 >= 0.55
+rangeZoneTxtV74 = premiumV74 ? "PREMIUM" : discountV74 ? "DISCOUNT" : "EQUILIBRIUM"
+
+// FVG: el rastreador V48 ya mitiga y caduca. Alias para el motor.
+bullFvgValidV74 = not na(bullFvgLow) and not na(bullFvgHigh)
+bearFvgValidV74 = not na(bearFvgLow) and not na(bearFvgHigh)
+
+// OB volumétrico: última vela opuesta antes del desplazamiento, con relevancia de volumen.
+volBasePoiV74 = math.max(ta.sma(nz(volume, 1.0), 30), 1.0)
+var float bullObLoV74 = na
+var float bullObHiV74 = na
+var float bullObVolV74 = na
+var int bullObBirthV74 = na
+var float bearObLoV74 = na
+var float bearObHiV74 = na
+var float bearObVolV74 = na
+var int bearObBirthV74 = na
+
+if bullObCond
+    bullObLoV74 := low[1]
+    bullObHiV74 := math.min(high[1], math.max(open[1], close[1]) + (high[1] - low[1]) * 0.25)
+    bullObVolV74 := nz(volume[1], 0.0) / volBasePoiV74
+    bullObBirthV74 := bar_index - 1
+if bearObCond
+    bearObLoV74 := math.max(low[1], math.min(open[1], close[1]) - (high[1] - low[1]) * 0.25)
+    bearObHiV74 := high[1]
+    bearObVolV74 := nz(volume[1], 0.0) / volBasePoiV74
+    bearObBirthV74 := bar_index - 1
+
+bullObDeadV74 = not na(bullObLoV74) and (bar_index - bullObBirthV74 > poiMaxAgeBars or close < bullObLoV74 - atr * 0.10)
+bearObDeadV74 = not na(bearObHiV74) and (bar_index - bearObBirthV74 > poiMaxAgeBars or close > bearObHiV74 + atr * 0.10)
+if bullObDeadV74
+    bullObLoV74 := na
+    bullObHiV74 := na
+    bullObVolV74 := na
+    bullObBirthV74 := na
+if bearObDeadV74
+    bearObLoV74 := na
+    bearObHiV74 := na
+    bearObVolV74 := na
+    bearObBirthV74 := na
+
+bullObValidV74 = not na(bullObLoV74) and not na(bullObHiV74)
+bearObValidV74 = not na(bearObLoV74) and not na(bearObHiV74)
+
+// Confluencia FVG + OB: si se solapan, el POI es la intersección.
+bullOverlapV74 = bullObValidV74 and bullFvgValidV74 and math.max(bullObLoV74, bullFvgLow) <= math.min(bullObHiV74, bullFvgHigh)
+bearOverlapV74 = bearObValidV74 and bearFvgValidV74 and math.max(bearObLoV74, bearFvgLow) <= math.min(bearObHiV74, bearFvgHigh)
+
+poiBuyLoV74 = bullOverlapV74 ? math.max(bullObLoV74, bullFvgLow) : bullObValidV74 ? bullObLoV74 : bullFvgValidV74 ? bullFvgLow : math.min(buyZoneFrom, buyZoneTo)
+poiBuyHiV74 = bullOverlapV74 ? math.min(bullObHiV74, bullFvgHigh) : bullObValidV74 ? bullObHiV74 : bullFvgValidV74 ? bullFvgHigh : math.max(buyZoneFrom, buyZoneTo)
+poiSellLoV74 = bearOverlapV74 ? math.max(bearObLoV74, bearFvgLow) : bearObValidV74 ? bearObLoV74 : bearFvgValidV74 ? bearFvgLow : math.min(sellZoneFrom, sellZoneTo)
+poiSellHiV74 = bearOverlapV74 ? math.min(bearObHiV74, bearFvgHigh) : bearObValidV74 ? bearObHiV74 : bearFvgValidV74 ? bearFvgHigh : math.max(sellZoneFrom, sellZoneTo)
+poiBuyTypeV74 = bullOverlapV74 ? "OB+FVG" : bullObValidV74 ? "OB" : bullFvgValidV74 ? "FVG" : "DEMANDA"
+poiSellTypeV74 = bearOverlapV74 ? "OB+FVG" : bearObValidV74 ? "OB" : bearFvgValidV74 ? "FVG" : "OFERTA"
+
+strongLowV74 = (d60 == 1 or d180 == 1 or d240 == 1) and (externalEQL or internalEQL or supportStrength >= 68)
+strongHighV74 = (d60 == -1 or d180 == -1 or d240 == -1) and (externalEQH or internalEQH or resistStrength >= 68)
+
+// V75: sin OB/FVG, la zona diaria solo cuenta si hubo barrida o absorción real.
+fallbackBuyV74 = not bullObValidV74 and not bullFvgValidV74 and inBuyZone and (sweepDown or absorbBuy or seqAbsorbBuy)
+fallbackSellV74 = not bearObValidV74 and not bearFvgValidV74 and inSellZone and (sweepUp or absorbSell or seqAbsorbSell)
+
+// Score de confluencia del POI. No es una probabilidad de acierto.
+poiBuyQualityV74 = math.min(100.0,
+     (bullObValidV74 ? 22.0 : 0.0) +
+     (bullFvgValidV74 ? 14.0 : 0.0) +
+     (bullOverlapV74 ? 12.0 : 0.0) +
+     (fallbackBuyV74 ? 16.0 : 0.0) +
+     (discountV74 ? 12.0 : 0.0) +
+     (externalEQL or internalEQL ? 10.0 : 0.0) +
+     (externalSweepLow or internalSweepDown or ictSslRaid ? 12.0 : 0.0) +
+     (strongLowV74 ? 10.0 : 0.0) +
+     (nz(bullObVolV74, 0.0) >= 1.15 ? 8.0 : nz(bullObVolV74, 0.0) >= 0.90 ? 4.0 : 0.0))
+
+poiSellQualityV74 = math.min(100.0,
+     (bearObValidV74 ? 22.0 : 0.0) +
+     (bearFvgValidV74 ? 14.0 : 0.0) +
+     (bearOverlapV74 ? 12.0 : 0.0) +
+     (fallbackSellV74 ? 16.0 : 0.0) +
+     (premiumV74 ? 12.0 : 0.0) +
+     (externalEQH or internalEQH ? 10.0 : 0.0) +
+     (externalSweepHigh or internalSweepUp or ictBslRaid ? 12.0 : 0.0) +
+     (strongHighV74 ? 10.0 : 0.0) +
+     (nz(bearObVolV74, 0.0) >= 1.15 ? 8.0 : nz(bearObVolV74, 0.0) >= 0.90 ? 4.0 : 0.0))
+
+poiBuyTouchV74 = low <= poiBuyHiV74 and high >= poiBuyLoV74
+poiSellTouchV74 = high >= poiSellLoV74 and low <= poiSellHiV74
+
+buyDistanceFromPoiAtrV74 = close > poiBuyHiV74 ? (close - poiBuyHiV74) / atrSafeV75 : 0.0
+sellDistanceFromPoiAtrV74 = close < poiSellLoV74 ? (poiSellLoV74 - close) / atrSafeV75 : 0.0
+
+buyTargetV74 = not na(ictBSL) ? ictBSL : externalLiquidityAbove
+sellTargetV74 = not na(ictSSL) ? ictSSL : externalLiquidityBelow
+buyRoomAtrV74 = (buyTargetV74 - close) / atrSafeV75
+sellRoomAtrV74 = (close - sellTargetV74) / atrSafeV75
+
+buyChaseBlockV74 = buyDistanceFromPoiAtrV74 > 0.55 or buyRoomAtrV74 < 0.65 or (nearResist and resistStrength >= 70 and not microBosBuy)
+sellChaseBlockV74 = sellDistanceFromPoiAtrV74 > 0.55 or sellRoomAtrV74 < 0.65 or (nearSupport and supportStrength >= 70 and not microBosSell)
+
+buyGoneV74 = buyDistanceFromPoiAtrV74 > 0.85 and not poiBuyTouchV74
+sellGoneV74 = sellDistanceFromPoiAtrV74 > 0.85 and not poiSellTouchV74
+
+poiBuyTxtV74 = "POI BUY · " + poiBuyTypeV74
+poiSellTxtV74 = "POI SELL · " + poiSellTypeV74
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V75 — MOTOR ÚNICO DE DECISIÓN EN VIVO
+// UNA sola autoridad para paneles, caja central, líneas y alertas.
+// El contexto HTF informa; NO pisa una oportunidad válida del precio actual.
+// Rechazo + absorción/flow/aceleración anticipan; la estructura formal eleva la calidad.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+buyExecLowV73  = poiBuyLoV74
+buyExecHighV73 = poiBuyHiV74
+sellExecLowV73  = poiSellLoV74
+sellExecHighV73 = poiSellHiV74
+
+buyLocationV73 = poiBuyTouchV74 or buyDistanceFromPoiAtrV74 <= 0.35
+sellLocationV73 = poiSellTouchV74 or sellDistanceFromPoiAtrV74 <= 0.35
+
+buyApproachV73 = low <= buyExecHighV73 + atr * 0.30 and high >= buyExecLowV73 - atr * 0.18
+sellApproachV73 = high >= sellExecLowV73 - atr * 0.30 and low <= sellExecHighV73 + atr * 0.18
+
+buyRejectV73 = (poiBuyTouchV74 or buyApproachV73) and (absorbBuy or seqAbsorbBuy or sweepDown or ictSslRaid or pocDefendedBuy or lowerWick > bodySafe * 0.72) and close > low + rng * 0.52
+sellRejectV73 = (poiSellTouchV74 or sellApproachV73) and (absorbSell or seqAbsorbSell or sweepUp or ictBslRaid or pocDefendedSell or upperWick > bodySafe * 0.72) and close < high - rng * 0.52
+
+buyStructureV73 = microBosBuy or ictBullMSS or ictBullChoch or bullDisplacement
+sellStructureV73 = microBosSell or ictBearMSS or ictBearChoch or bearDisplacement
+
+buyEarlyTriggerV73 = realAccelBuy or buyImpulse or deltaAccelerationBuy or (buyPressure and close > open and close >= ema9) or (preImpulseNow and preDirection == 1 and velocityWakeBuy)
+sellEarlyTriggerV73 = realAccelSell or sellImpulse or deltaAccelerationSell or (sellPressure and close < open and close <= ema9) or (preImpulseNow and preDirection == -1 and velocityWakeSell)
+
+volRelV73 = nz(volume, 1.0) / math.max(volBase20, 1.0)
+buyMomentumV73 = buyEarlyTriggerV73 or (close > open and body >= atr * 0.22 and closeNearHigh and volRelV73 >= 0.90)
+sellMomentumV73 = sellEarlyTriggerV73 or (close < open and body >= atr * 0.22 and closeNearLow and volRelV73 >= 0.90)
+
+buySpaceAtrV73 = not na(ictBSL) and atr > 0 ? math.max(0.0, ictBSL - close) / atr : 2.0
+sellSpaceAtrV73 = not na(ictSSL) and atr > 0 ? math.max(0.0, close - ictSSL) / atr : 2.0
+buySpaceOkV73 = buySpaceAtrV73 >= 0.28 and not lateBuyExhaustion and not antiTopBuy and not buyChaseBlockV74
+sellSpaceOkV73 = sellSpaceAtrV73 >= 0.28 and not lateSellExhaustion and not antiBottomSell and not sellChaseBlockV74
+
+buyLiveScoreV73 = math.max(0.0, math.min(100.0, poiBuyQualityV74 * 0.42 + (buyRejectV73 ? 20.0 : 0.0) + (buyStructureV73 ? 16.0 : 0.0) + (buyMomentumV73 ? 12.0 : 0.0) + (buyPressure ? 6.0 : 0.0) + (buyChaseBlockV74 ? -24.0 : 0.0)))
+sellLiveScoreV73 = math.max(0.0, math.min(100.0, poiSellQualityV74 * 0.42 + (sellRejectV73 ? 20.0 : 0.0) + (sellStructureV73 ? 16.0 : 0.0) + (sellMomentumV73 ? 12.0 : 0.0) + (sellPressure ? 6.0 : 0.0) + (sellChaseBlockV74 ? -24.0 : 0.0)))
+
+hardNewsBlockV73 = manualNewsRisk
+spikeRiskV73 = volExtremeV61
+
+prepareBuyV73 = not hardNewsBlockV73 and not buyChaseBlockV74 and poiBuyQualityV74 >= poiMinPrepareV75 and (poiBuyTouchV74 or buyRejectV73) and buyLiveScoreV73 >= 48
+prepareSellV73 = not hardNewsBlockV73 and not sellChaseBlockV74 and poiSellQualityV74 >= poiMinPrepareV75 and (poiSellTouchV74 or sellRejectV73) and sellLiveScoreV73 >= 48
+
+enterBuyRawV73 = not hardNewsBlockV73 and not buyChaseBlockV74 and buyRejectV73 and buySpaceOkV73 and buyNoFomo and poiBuyQualityV74 >= poiMinEnterV75 and (buyStructureV73 or buyMomentumV73) and buyLiveScoreV73 >= liveScoreEnterV75
+enterSellRawV73 = not hardNewsBlockV73 and not sellChaseBlockV74 and sellRejectV73 and sellSpaceOkV73 and sellNoFomo and poiSellQualityV74 >= poiMinEnterV75 and (sellStructureV73 or sellMomentumV73) and sellLiveScoreV73 >= liveScoreEnterV75
+
+if enterBuyRawV73 and enterSellRawV73
+    enterBuyRawV73 := buyLiveScoreV73 > sellLiveScoreV73 + 5
+    enterSellRawV73 := sellLiveScoreV73 > buyLiveScoreV73 + 5
+if prepareBuyV73 and prepareSellV73
+    prepareBuyV73 := buyLiveScoreV73 > sellLiveScoreV73 + 5
+    prepareSellV73 := sellLiveScoreV73 > buyLiveScoreV73 + 5
+
+// SL y objetivos ÚNICOS: la misma fórmula alimenta panel, líneas, posición viva y alerta.
+buySlV73 = f_slBuy(poiBuyLoV74)
+sellSlV73 = f_slSell(poiSellHiV74)
+[buyTp1V75, buyTp2V75, buyTp3V75, buyTp4V75, buyTp5V75] = f_tpBuy(poiBuyHiV74)
+[sellTp1V75, sellTp2V75, sellTp3V75, sellTp4V75, sellTp5V75] = f_tpSell(poiSellLoV74)
+
+//━━━━━━━━━━━━━━━━━━
+// V75 — POSICIÓN VIVA: entrada, gestión (TP ✓, SL a entrada), salidas y estadística en vivo
+//━━━━━━━━━━━━━━━━━━
+var int liveTradeDirV73 = 0
+var float liveEntryV73 = na
+var float liveSlV73 = na
+var float liveSlOrigV75 = na
+var int liveEntryBarV73 = na
+var float liveZoneLoV75 = na
+var float liveZoneHiV75 = na
+var float liveTp1V75 = na
+var float liveTp2V75 = na
+var float liveTp3V75 = na
+var float liveTp4V75 = na
+var float liveTp5V75 = na
+var bool liveTp1HitV75 = false
+var bool liveTp2HitV75 = false
+var bool liveTp3HitV75 = false
+var bool liveTp4HitV75 = false
+var bool liveTp5HitV75 = false
+var int statsTotalV75 = 0
+var int statsWinV75 = 0
+var int statsLossV75 = 0
+
+enterBuyNowV73 = enterBuyRawV73 and not enterBuyRawV73[1] and liveTradeDirV73 != 1
+enterSellNowV73 = enterSellRawV73 and not enterSellRawV73[1] and liveTradeDirV73 != -1
+
+// 1) Gestión de la posición abierta (antes de evaluar salidas).
+if liveTradeDirV73 == 1
+    if not liveTp1HitV75 and high >= liveTp1V75
+        liveTp1HitV75 := true
+        if moveSlToBeV75
+            liveSlV73 := math.max(liveSlV73, liveEntryV73)
+    if not liveTp2HitV75 and high >= liveTp2V75
+        liveTp2HitV75 := true
+        if moveSlToBeV75
+            liveSlV73 := math.max(liveSlV73, liveTp1V75)
+    if not liveTp3HitV75 and high >= liveTp3V75
+        liveTp3HitV75 := true
+        if moveSlToBeV75
+            liveSlV73 := math.max(liveSlV73, liveTp2V75)
+    if not liveTp4HitV75 and high >= liveTp4V75
+        liveTp4HitV75 := true
+        if moveSlToBeV75
+            liveSlV73 := math.max(liveSlV73, liveTp3V75)
+    if not liveTp5HitV75 and high >= liveTp5V75
+        liveTp5HitV75 := true
+if liveTradeDirV73 == -1
+    if not liveTp1HitV75 and low <= liveTp1V75
+        liveTp1HitV75 := true
+        if moveSlToBeV75
+            liveSlV73 := math.min(liveSlV73, liveEntryV73)
+    if not liveTp2HitV75 and low <= liveTp2V75
+        liveTp2HitV75 := true
+        if moveSlToBeV75
+            liveSlV73 := math.min(liveSlV73, liveTp1V75)
+    if not liveTp3HitV75 and low <= liveTp3V75
+        liveTp3HitV75 := true
+        if moveSlToBeV75
+            liveSlV73 := math.min(liveSlV73, liveTp2V75)
+    if not liveTp4HitV75 and low <= liveTp4V75
+        liveTp4HitV75 := true
+        if moveSlToBeV75
+            liveSlV73 := math.min(liveSlV73, liveTp3V75)
+    if not liveTp5HitV75 and low <= liveTp5V75
+        liveTp5HitV75 := true
+
+// 2) Salidas: SL, objetivo final, tiempo máximo o entrada contraria.
+liveBarsV75 = liveTradeDirV73 != 0 ? bar_index - liveEntryBarV73 : 0
+buySlHitV75 = liveTradeDirV73 == 1 and liveBarsV75 > 0 and low <= liveSlV73
+sellSlHitV75 = liveTradeDirV73 == -1 and liveBarsV75 > 0 and high >= liveSlV73
+buyTargetDoneV75 = liveTradeDirV73 == 1 and liveTp5HitV75
+sellTargetDoneV75 = liveTradeDirV73 == -1 and liveTp5HitV75
+buyTimeOutV75 = liveTradeDirV73 == 1 and liveBarsV75 >= tradeMaxBarsV75
+sellTimeOutV75 = liveTradeDirV73 == -1 and liveBarsV75 >= tradeMaxBarsV75
+closeBuyV75 = liveTradeDirV73 == 1 and (buySlHitV75 or buyTargetDoneV75 or buyTimeOutV75 or enterSellNowV73)
+closeSellV75 = liveTradeDirV73 == -1 and (sellSlHitV75 or sellTargetDoneV75 or sellTimeOutV75 or enterBuyNowV73)
+
+if closeBuyV75 or closeSellV75
+    if liveTp1HitV75
+        statsWinV75 += 1
+    else
+        statsLossV75 += 1
+    liveTradeDirV73 := 0
+    liveEntryV73 := na
+    liveSlV73 := na
+    liveSlOrigV75 := na
+    liveEntryBarV73 := na
+    liveZoneLoV75 := na
+    liveZoneHiV75 := na
+    liveTp1V75 := na
+    liveTp2V75 := na
+    liveTp3V75 := na
+    liveTp4V75 := na
+    liveTp5V75 := na
+    liveTp1HitV75 := false
+    liveTp2HitV75 := false
+    liveTp3HitV75 := false
+    liveTp4HitV75 := false
+    liveTp5HitV75 := false
+
+// 3) Entradas nuevas.
+if enterBuyNowV73
+    liveTradeDirV73 := 1
+    liveEntryV73 := close
+    liveSlV73 := buySlV73
+    liveSlOrigV75 := buySlV73
+    liveEntryBarV73 := bar_index
+    liveZoneLoV75 := poiBuyLoV74
+    liveZoneHiV75 := poiBuyHiV74
+    liveTp1V75 := buyTp1V75
+    liveTp2V75 := buyTp2V75
+    liveTp3V75 := buyTp3V75
+    liveTp4V75 := buyTp4V75
+    liveTp5V75 := buyTp5V75
+    statsTotalV75 += 1
+if enterSellNowV73
+    liveTradeDirV73 := -1
+    liveEntryV73 := close
+    liveSlV73 := sellSlV73
+    liveSlOrigV75 := sellSlV73
+    liveEntryBarV73 := bar_index
+    liveZoneLoV75 := poiSellLoV74
+    liveZoneHiV75 := poiSellHiV74
+    liveTp1V75 := sellTp1V75
+    liveTp2V75 := sellTp2V75
+    liveTp3V75 := sellTp3V75
+    liveTp4V75 := sellTp4V75
+    liveTp5V75 := sellTp5V75
+    statsTotalV75 += 1
+
+buyLiveV73 = liveTradeDirV73 == 1
+sellLiveV73 = liveTradeDirV73 == -1
+liveSlProtectedV75 = liveTradeDirV73 != 0 and not na(liveSlOrigV75) and liveSlV73 != liveSlOrigV75
+liveTpCountV75 = (liveTp1HitV75 ? 1 : 0) + (liveTp2HitV75 ? 1 : 0) + (liveTp3HitV75 ? 1 : 0) + (liveTp4HitV75 ? 1 : 0) + (liveTp5HitV75 ? 1 : 0)
+
+// Ventana "ENTRAR YA": no dura una sola vela, sigue activa mientras la entrada siga siendo válida.
+enterWindowBuyV75 = buyLiveV73 and bar_index - liveEntryBarV73 <= entryWindowBarsV75 and not buyChaseBlockV74 and not liveTp1HitV75
+enterWindowSellV75 = sellLiveV73 and bar_index - liveEntryBarV73 <= entryWindowBarsV75 and not sellChaseBlockV74 and not liveTp1HitV75
+
+buyContinuationLiveV73 = buyLiveV73 and (continuationBuyV61 or buyPressure or deltaAccelerationBuy or d5 == 1 or d15 == 1)
+sellContinuationLiveV73 = sellLiveV73 and (continuationSellV61 or sellPressure or deltaAccelerationSell or d5 == -1 or d15 == -1)
+buyPullbackLiveV73 = buyLiveV73 and (d5 == -1 or d15 == -1 or close < ema9)
+sellPullbackLiveV73 = sellLiveV73 and (d5 == 1 or d15 == 1 or close > ema9)
+protectBuyV73 = buyLiveV73 and ((nearResist and resistStrength >= 68) or lateBuyExhaustion or (upperWick > bodySafe * 0.90 and sellPressure and close < open) or (liveTp2HitV75 and not liveTp3HitV75 and sellPressure))
+protectSellV73 = sellLiveV73 and ((nearSupport and supportStrength >= 68) or lateSellExhaustion or (lowerWick > bodySafe * 0.90 and buyPressure and close > open) or (liveTp2HitV75 and not liveTp3HitV75 and buyPressure))
+
+macroVotesV73 = (d240 == 1 ? 1 : d240 == -1 ? -1 : 0) + (d180 == 1 ? 1 : d180 == -1 ? -1 : 0) + (d60 == 1 ? 1 : d60 == -1 ? -1 : 0)
+macroContextDirV73 = macroVotesV73 >= 2 ? 1 : macroVotesV73 <= -2 ? -1 : 0
+macroContextTxtV73 = macroContextDirV73 == 1 ? "CONTEXTO H1/H3/H4: ALCISTA" : macroContextDirV73 == -1 ? "CONTEXTO H1/H3/H4: BAJISTA" : "CONTEXTO H1/H3/H4: MIXTO"
+
+stateDirV73 = enterWindowBuyV75 ? 1 : enterWindowSellV75 ? -1 :
+     buyLiveV73 ? 1 : sellLiveV73 ? -1 :
+     prepareBuyV73 ? 1 : prepareSellV73 ? -1 :
+     buyLocationV73 and buyLiveScoreV73 >= sellLiveScoreV73 ? 1 :
+     sellLocationV73 ? -1 : 0
+stateScoreV73 = stateDirV73 == 1 ? buyLiveScoreV73 : stateDirV73 == -1 ? sellLiveScoreV73 : math.max(buyLiveScoreV73, sellLiveScoreV73)
+
+// V75: la posición viva SIEMPRE tiene prioridad sobre "ya se fue"; 71/72 ya no son NO TRADEAR.
+stateCodeV73 = hardNewsBlockV73 ? 0 :
+     closeBuyV75 and buyTargetDoneV75 ? 63 :
+     closeSellV75 and sellTargetDoneV75 ? 64 :
+     closeBuyV75 and buySlHitV75 ? 65 :
+     closeSellV75 and sellSlHitV75 ? 66 :
+     enterWindowBuyV75 ? 31 :
+     enterWindowSellV75 ? 32 :
+     protectBuyV73 ? 61 :
+     protectSellV73 ? 62 :
+     buyPullbackLiveV73 ? 51 :
+     sellPullbackLiveV73 ? 52 :
+     buyLiveV73 ? 41 :
+     sellLiveV73 ? 42 :
+     prepareBuyV73 ? 21 :
+     prepareSellV73 ? 22 :
+     lateralWait ? 10 :
+     buyGoneV74 and buyLiveScoreV73 >= sellLiveScoreV73 ? 71 :
+     sellGoneV74 and sellLiveScoreV73 > buyLiveScoreV73 ? 72 :
+     buyLocationV73 or sellLocationV73 ? 11 : 12
+
+stateTxtV73 = stateCodeV73 == 0 ? "NO TRADEAR · EVENTO MANUAL" :
+     stateCodeV73 == 63 ? "BUY · OBJETIVO FINAL ALCANZADO" :
+     stateCodeV73 == 64 ? "SELL · OBJETIVO FINAL ALCANZADO" :
+     stateCodeV73 == 65 ? "BUY · STOP TOCADO" :
+     stateCodeV73 == 66 ? "SELL · STOP TOCADO" :
+     stateCodeV73 == 31 ? "ENTRAR YA · BUY" :
+     stateCodeV73 == 32 ? "ENTRAR YA · SELL" :
+     stateCodeV73 == 71 ? "BUY YA SE FUE · ESPERAR RETROCESO" :
+     stateCodeV73 == 72 ? "SELL YA SE FUE · ESPERAR RETROCESO" :
+     stateCodeV73 == 61 ? "PROTEGER BUY / PARCIALES" :
+     stateCodeV73 == 62 ? "PROTEGER SELL / PARCIALES" :
+     stateCodeV73 == 51 ? "RETROCESO BAJISTA · BUY SIGUE VIVO" :
+     stateCodeV73 == 52 ? "RETROCESO ALCISTA · SELL SIGUE VIVO" :
+     stateCodeV73 == 41 ? "BUY VIVO · CONTINUACIÓN" :
+     stateCodeV73 == 42 ? "SELL VIVO · CONTINUACIÓN" :
+     stateCodeV73 == 21 ? "PREPARAR BUY · NO ENTRAR AÚN" :
+     stateCodeV73 == 22 ? "PREPARAR SELL · NO ENTRAR AÚN" :
+     stateCodeV73 == 10 ? "NO TRADEAR · LATERAL" :
+     stateCodeV73 == 11 ? "ESPERAR · POI ACTIVO" : "ESPERAR · SIN ZONA"
+
+actionTxtV73 = stateCodeV73 == 31 ? "EJECUTAR BUY EN LA ZONA ACTUAL" :
+     stateCodeV73 == 32 ? "EJECUTAR SELL EN LA ZONA ACTUAL" :
+     stateCodeV73 == 63 or stateCodeV73 == 64 ? "CERRAR RUNNER · TRADE COMPLETADO" :
+     stateCodeV73 == 65 or stateCodeV73 == 66 ? "FUERA · ESPERAR NUEVO POI" :
+     stateCodeV73 == 71 ? "ESPERAR RETROCESO AL POI BUY" :
+     stateCodeV73 == 72 ? "ESPERAR RETROCESO AL POI SELL" :
+     stateCodeV73 == 21 or stateCodeV73 == 22 ? "NO ENTRAR · FALTA IMPULSO/ESTRUCTURA" :
+     stateCodeV73 == 41 ? "MANTENER BUY · VIGILAR SIGUIENTE RESISTENCIA" :
+     stateCodeV73 == 42 ? "MANTENER SELL · VIGILAR SIGUIENTE SOPORTE" :
+     stateCodeV73 == 51 or stateCodeV73 == 52 ? "NO CERRAR POR RUIDO · VIGILAR SL" :
+     stateCodeV73 == 61 or stateCodeV73 == 62 ? "TOMAR PARCIAL / PROTEGER" :
+     stateCodeV73 == 0 ? "NO ABRIR OPERACIÓN" :
+     stateCodeV73 == 10 ? "ESPERAR SALIDA DEL RANGO" :
+     stateCodeV73 == 11 ? "ESPERAR RECHAZO / ABSORCIÓN" : "ESPERAR NUEVA ZONA"
+
+stateZoneLowV73 = buyLiveV73 or sellLiveV73 ? liveZoneLoV75 : stateDirV73 == 1 ? buyExecLowV73 : stateDirV73 == -1 ? sellExecLowV73 : na
+stateZoneHighV73 = buyLiveV73 or sellLiveV73 ? liveZoneHiV75 : stateDirV73 == 1 ? buyExecHighV73 : stateDirV73 == -1 ? sellExecHighV73 : na
+stateZoneTxtV73 = stateDirV73 != 0 ? f_range(stateZoneLowV73, stateZoneHighV73) : "SIN ZONA ACTIVA"
+
+continuationDirTxtV73 = buyContinuationLiveV73 ? "CONTINÚA BUY" : sellContinuationLiveV73 ? "CONTINÚA SELL" : buyPullbackLiveV73 ? "BUY EN RETROCESO" : sellPullbackLiveV73 ? "SELL EN RETROCESO" : "SIN CONTINUACIÓN CONFIRMADA"
+earlyImpulseTxtV73 = buyMomentumV73 and buyLiveScoreV73 >= sellLiveScoreV73 ? "IMPULSO BUY NACIENDO" : sellMomentumV73 ? "IMPULSO SELL NACIENDO" : compression ? "COMPRESIÓN · POSIBLE EXPANSIÓN" : "SIN IMPULSO TEMPRANO"
+structureTxtV73 = buyStructureV73 and buyLiveScoreV73 >= sellLiveScoreV73 ? "BOS/MSS/CHoCH BUY" : sellStructureV73 ? "BOS/MSS/CHoCH SELL" : "ESTRUCTURA AÚN NO CONFIRMADA"
+poiTxtV74 = stateDirV73 == 1 ? poiBuyTxtV74 + " " + str.tostring(math.round(poiBuyQualityV74)) + "%" :
+     stateDirV73 == -1 ? poiSellTxtV74 + " " + str.tostring(math.round(poiSellQualityV74)) + "%" :
+     poiBuyQualityV74 >= poiSellQualityV74 ? poiBuyTxtV74 + " " + str.tostring(math.round(poiBuyQualityV74)) + "%" : poiSellTxtV74 + " " + str.tostring(math.round(poiSellQualityV74)) + "%"
+eventTxtV73 = hardNewsBlockV73 ? "EVENTO MANUAL · BLOQUEADO" : spikeRiskV73 ? "VOLATILIDAD EXTREMA · GESTIONAR RIESGO" : "EVENTO/RIESGO: NORMAL"
+
+// Grado del setup (A/B/C) como en el panel de referencia.
+setupGradeV75 = stateScoreV73 >= 80 and (stateCodeV73 == 31 or stateCodeV73 == 32) ? "A" : stateScoreV73 >= 60 ? "B" : stateScoreV73 >= 40 ? "C" : "-"
+
+executionRisk = hardNewsBlockV73 or spikeRiskV73 or lateBuyExhaustion or lateSellExhaustion ? "ALTO" :
+     stateCodeV73 == 31 or stateCodeV73 == 32 ? "CONTROLADO" :
+     stateCodeV73 == 21 or stateCodeV73 == 22 ? "MEDIO" :
+     stateCodeV73 == 61 or stateCodeV73 == 62 ? "PROTEGER" : "ESPERAR"
+
+// Alias para las capas visuales que leen nombres V72.
+execEnterBuyV72 = stateCodeV73 == 31
+execEnterSellV72 = stateCodeV73 == 32
+execArmedBuyV72 = stateCodeV73 == 21
+execArmedSellV72 = stateCodeV73 == 22
+execDirV72 = stateDirV73
+macroContextDirV72 = macroContextDirV73
+buyLocationV72 = buyLocationV73
+sellLocationV72 = sellLocationV73
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V75 — PLAN FINAL ÚNICO
+// Posición viva > oportunidad POI > contexto del CORE. Lo dibujado y lo enviado por alerta sale de aquí.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+planLiveV75 = buyLiveV73 or sellLiveV73
+planDirV73 = stateDirV73 != 0 ? stateDirV73 : masterDir
+[coreBuyTp1V75, coreBuyTp2V75, coreBuyTp3V75, coreBuyTp4V75, coreBuyTp5V75] = f_tpBuy(nz(entryHigh, close))
+[coreSellTp1V75, coreSellTp2V75, coreSellTp3V75, coreSellTp4V75, coreSellTp5V75] = f_tpSell(nz(entryLow, close))
+
+planEntryLowV73 = planLiveV75 ? liveZoneLoV75 : stateDirV73 == 1 ? poiBuyLoV74 : stateDirV73 == -1 ? poiSellLoV74 : entryLow
+planEntryHighV73 = planLiveV75 ? liveZoneHiV75 : stateDirV73 == 1 ? poiBuyHiV74 : stateDirV73 == -1 ? poiSellHiV74 : entryHigh
+planEntryLineV73 = planLiveV75 ? liveEntryV73 : planDirV73 == 1 ? planEntryHighV73 : planDirV73 == -1 ? planEntryLowV73 : na
+planSlV73 = planLiveV75 ? liveSlV73 : stateDirV73 == 1 ? buySlV73 : stateDirV73 == -1 ? sellSlV73 : masterDir == 1 ? f_slBuy(entryLow) : masterDir == -1 ? f_slSell(entryHigh) : na
+planTp1V73 = planLiveV75 ? liveTp1V75 : stateDirV73 == 1 ? buyTp1V75 : stateDirV73 == -1 ? sellTp1V75 : masterDir == 1 ? coreBuyTp1V75 : masterDir == -1 ? coreSellTp1V75 : na
+planTp2V73 = planLiveV75 ? liveTp2V75 : stateDirV73 == 1 ? buyTp2V75 : stateDirV73 == -1 ? sellTp2V75 : masterDir == 1 ? coreBuyTp2V75 : masterDir == -1 ? coreSellTp2V75 : na
+planTp3V73 = planLiveV75 ? liveTp3V75 : stateDirV73 == 1 ? buyTp3V75 : stateDirV73 == -1 ? sellTp3V75 : masterDir == 1 ? coreBuyTp3V75 : masterDir == -1 ? coreSellTp3V75 : na
+planTp4V73 = planLiveV75 ? liveTp4V75 : stateDirV73 == 1 ? buyTp4V75 : stateDirV73 == -1 ? sellTp4V75 : masterDir == 1 ? coreBuyTp4V75 : masterDir == -1 ? coreSellTp4V75 : na
+planTp5V73 = planLiveV75 ? liveTp5V75 : stateDirV73 == 1 ? buyTp5V75 : stateDirV73 == -1 ? sellTp5V75 : masterDir == 1 ? coreBuyTp5V75 : masterDir == -1 ? coreSellTp5V75 : na
+planValidV73 = planDirV73 != 0 and not na(planEntryLowV73) and not na(planEntryHighV73) and not na(planSlV73) and not na(planEntryLineV73)
+planSourceTxtV73 = planLiveV75 ? "POSICIÓN VIVA" : stateDirV73 != 0 ? "POI V75" : "CONTEXTO CORE"
+planEntryTxtV73 = f_range(planEntryLowV73, planEntryHighV73)
+planRiskV75 = planValidV73 ? math.abs(planEntryLineV73 - planSlV73) : na
+planRrTxtV75 = not na(planRiskV75) and planRiskV75 > 0 and not na(planTp1V73) ? "1 : " + str.tostring(math.abs(planTp1V73 - planEntryLineV73) / planRiskV75, "#.0") : "-"
+
+stateSlTxtV73 = f_px(planSlV73) + (liveSlProtectedV75 ? " (PROTEGIDO)" : "")
+stateTargetTxtV73 = stateDirV73 != 0 ? "TP1 " + f_px(planTp1V73) + "  ·  RUNNER " + f_px(planTp5V73) + "\nLIQUIDEZ " + f_px(stateDirV73 == 1 ? ictBSL : ictSSL) : "-"
+liveTpTxtV75 = planLiveV75 ? "TP " + str.tostring(liveTpCountV75) + "/5 ✓  ·  " + str.tostring(liveBarsV75) + " velas" : "SIN POSICIÓN VIVA"
+
+// UX rápida (cards)
+uxEstado = stateCodeV73 == 31 or stateCodeV73 == 32 ? "ENTRAR YA" :
+     stateCodeV73 == 21 or stateCodeV73 == 22 ? "PREPARAR / NO ENTRAR" :
+     stateCodeV73 == 41 or stateCodeV73 == 42 ? "POSICIÓN VIVA" :
+     stateCodeV73 == 51 or stateCodeV73 == 52 ? "RETROCESO" :
+     stateCodeV73 == 61 or stateCodeV73 == 62 ? "PROTEGER" :
+     stateCodeV73 == 63 or stateCodeV73 == 64 ? "OBJETIVO" :
+     stateCodeV73 == 65 or stateCodeV73 == 66 ? "STOP" :
+     stateCodeV73 == 0 or stateCodeV73 == 10 ? "NO TRADEAR" : "ESPERAR"
+uxFase = stateCodeV73 == 31 or stateCodeV73 == 32 ? "GATILLO ACTIVO" :
+     stateCodeV73 == 21 or stateCodeV73 == 22 ? "RECHAZO/ABSORCIÓN DETECTADO" :
+     stateCodeV73 == 41 or stateCodeV73 == 42 ? "CONTINUACIÓN" :
+     stateCodeV73 == 51 or stateCodeV73 == 52 ? "RETROCESO" : "OBSERVACIÓN"
+uxSpacePct = stateDirV73 == 1 ? math.round(math.min(100.0, buySpaceAtrV73 / 2.0 * 100.0)) : stateDirV73 == -1 ? math.round(math.min(100.0, sellSpaceAtrV73 / 2.0 * 100.0)) : 0
+uxSpaceTxt = stateDirV73 == 0 ? "SIN DIRECCIÓN" : str.tostring(uxSpacePct) + "% ESPACIO"
+uxColorV75 = stateCodeV73 == 31 ? v63Green : stateCodeV73 == 32 ? v63Red : stateCodeV73 == 21 or stateCodeV73 == 22 ? v63Amber : stateCodeV73 == 0 or stateCodeV73 == 10 ? v63Red : v63Cyan
+
+//━━━━━━━━━━━━━━━━━━
+// OBJETOS: ENTRY/SL/TP + CAJAS RIESGO/BENEFICIO + TP ✓ + SL PROTEGIDO (obedecen al PLAN FINAL)
+//━━━━━━━━━━━━━━━━━━
+var box bxEntry = na
+var box bxRisk = na
+var box bxProfit = na
+var label labLive = na
+var line lnEntry = na
+var line lnSL = na
+var line lnSLOrig = na
+var line lnTP1 = na
+var line lnTP2 = na
+var line lnTP3 = na
+var line lnTP4 = na
+var line lnTP5 = na
+var label tagEntry = na
+var label tagSL = na
+var label tagTP1 = na
+var label tagTP2 = na
+var label tagTP3 = na
+var label tagTP4 = na
+var label tagTP5 = na
+
+f_delete_objects() =>
+    box.delete(bxEntry)
+    box.delete(bxRisk)
+    box.delete(bxProfit)
+    label.delete(labLive)
+    line.delete(lnEntry)
+    line.delete(lnSL)
+    line.delete(lnSLOrig)
+    line.delete(lnTP1)
+    line.delete(lnTP2)
+    line.delete(lnTP3)
+    line.delete(lnTP4)
+    line.delete(lnTP5)
+    label.delete(tagEntry)
+    label.delete(tagSL)
+    label.delete(tagTP1)
+    label.delete(tagTP2)
+    label.delete(tagTP3)
+    label.delete(tagTP4)
+    label.delete(tagTP5)
+
+f_tpTagV75(_n, _px, _hit) => "TP " + str.tostring(_n) + (_hit ? " ✓" : "") + ": " + f_px(_px)
+f_tpColorV75(_hit, _tr) => _hit ? color.new(color.aqua, _tr) : color.new(color.lime, _tr)
+
+if barstate.islast
+    f_delete_objects()
+    tp1HitShow = planLiveV75 and liveTp1HitV75
+    tp2HitShow = planLiveV75 and liveTp2HitV75
+    tp3HitShow = planLiveV75 and liveTp3HitV75
+    tp4HitShow = planLiveV75 and liveTp4HitV75
+    tp5HitShow = planLiveV75 and liveTp5HitV75
+
+    if showMapBox and planValidV73
+        dirColor = planDirV73 == 1 ? color.lime : color.red
+        dirName = planDirV73 == 1 ? "BUY" : "SELL"
+        bxEntry := box.new(bar_index - 6, planEntryHighV73, bar_index + boxBarsRight, planEntryLowV73, bgcolor=color.new(dirColor, 84), border_color=color.new(dirColor, 0), border_width=2, text="ZONA DE ENTRADA · " + planSourceTxtV73 + "\n" + dirName + "\nDESDE " + f_px(planEntryLowV73) + "\nHASTA " + f_px(planEntryHighV73) + "\n" + stateTxtV73, text_color=color.white, text_size=size.small)
+
+    if showRrBoxesV75 and planValidV73
+        bxRisk := box.new(bar_index - 6, math.max(planEntryLineV73, planSlV73), bar_index + boxBarsRight, math.min(planEntryLineV73, planSlV73), bgcolor=color.new(color.red, 92), border_color=color.new(color.red, 45), border_width=1, text="RIESGO · SL " + f_px(planSlV73) + (liveSlProtectedV75 ? " · PROTEGIDO" : ""), text_color=color.new(color.white, 25), text_size=size.tiny)
+        bxProfit := box.new(bar_index - 6, math.max(planEntryLineV73, planTp2V73), bar_index + boxBarsRight, math.min(planEntryLineV73, planTp2V73), bgcolor=color.new(color.green, 93), border_color=color.new(color.green, 45), border_width=1, text="BENEFICIO · R " + planRrTxtV75, text_color=color.new(color.white, 25), text_size=size.tiny)
+
+    if showTPLevels and planValidV73
+        x1 = bar_index - 12
+        x2 = bar_index + boxBarsRight + 20
+        slColor = liveSlProtectedV75 ? color.orange : color.red
+        lnEntry := line.new(x1, planEntryLineV73, x2, planEntryLineV73, color=color.new(color.white, 0), width=2)
+        lnSL := line.new(x1, planSlV73, x2, planSlV73, color=color.new(slColor, 0), width=2)
+        if liveSlProtectedV75 and not na(liveSlOrigV75)
+            lnSLOrig := line.new(x1, liveSlOrigV75, x2, liveSlOrigV75, color=color.new(color.red, 55), width=1, style=line.style_dotted)
+        lnTP1 := line.new(x1, planTp1V73, x2, planTp1V73, color=f_tpColorV75(tp1HitShow, 0), width=1)
+        lnTP2 := line.new(x1, planTp2V73, x2, planTp2V73, color=f_tpColorV75(tp2HitShow, 15), width=1)
+        lnTP3 := line.new(x1, planTp3V73, x2, planTp3V73, color=f_tpColorV75(tp3HitShow, 25), width=1)
+        lnTP4 := line.new(x1, planTp4V73, x2, planTp4V73, color=f_tpColorV75(tp4HitShow, 35), width=1)
+        lnTP5 := line.new(x1, planTp5V73, x2, planTp5V73, color=f_tpColorV75(tp5HitShow, 45), width=1)
+        tagEntry := label.new(x2, planEntryLineV73, "ENTRY " + (planDirV73 == 1 ? "BUY" : "SELL") + (planLiveV75 ? " · VIVA" : "") + ": " + f_px(planEntryLineV73), style=label.style_label_left, color=color.new(color.white, 0), textcolor=color.black, size=size.normal)
+        tagSL := label.new(x2, planSlV73, "STOP LOSS" + (liveSlProtectedV75 ? " (PROTEGIDO)" : "") + ": " + f_px(planSlV73), style=label.style_label_left, color=color.new(slColor, 0), textcolor=color.white, size=size.small)
+        tagTP1 := label.new(x2, planTp1V73, f_tpTagV75(1, planTp1V73, tp1HitShow), style=label.style_label_left, color=f_tpColorV75(tp1HitShow, 0), textcolor=color.black, size=size.normal)
+        tagTP2 := label.new(x2, planTp2V73, f_tpTagV75(2, planTp2V73, tp2HitShow), style=label.style_label_left, color=f_tpColorV75(tp2HitShow, 0), textcolor=color.black, size=size.small)
+        tagTP3 := label.new(x2, planTp3V73, f_tpTagV75(3, planTp3V73, tp3HitShow), style=label.style_label_left, color=f_tpColorV75(tp3HitShow, 0), textcolor=color.black, size=size.small)
+        tagTP4 := label.new(x2, planTp4V73, f_tpTagV75(4, planTp4V73, tp4HitShow), style=label.style_label_left, color=f_tpColorV75(tp4HitShow, 0), textcolor=color.black, size=size.small)
+        tagTP5 := label.new(x2, planTp5V73, f_tpTagV75(5, planTp5V73, tp5HitShow), style=label.style_label_left, color=f_tpColorV75(tp5HitShow, 0), textcolor=color.black, size=size.small)
+
+    if showLiveLabel
+        yLab = planDirV73 == 1 ? low - atr * 1.2 : planDirV73 == -1 ? high + atr * 1.2 : high + atr
+        labLive := label.new(bar_index + 4, yLab, stateTxtV73 + "\n" + actionTxtV73 + "\n" + macroContextTxtV73 + "\nZONA " + planEntryTxtV73 + "\n" + liveTpTxtV75, style=planDirV73 == 1 ? label.style_label_up : planDirV73 == -1 ? label.style_label_down : label.style_label_left, color=planDirV73 == 1 ? color.new(color.green, 0) : planDirV73 == -1 ? color.new(color.red, 0) : color.new(color.orange, 0), textcolor=color.white, size=size.normal)
+
+//━━━━━━━━━━━━━━━━━━
+// CABECERA MTF
+//━━━━━━━━━━━━━━━━━━
+var table headerV63 = table.new(position.top_center, 11, 2,
+     frame_color=color.new(v63Gold, 25), frame_width=2,
+     border_color=color.new(v63Line, 28), border_width=1)
+
+f_tfCellTxt(d, rr) => tfDirTxt(d) + " " + str.tostring(f_tfStrengthV67(d, rr)) + "%"
+f_tfCellColor(d) => d == 1 ? v63Green : d == -1 ? v63Red : v63Gray
+
+f_drawHeaderV63() =>
+    table.clear(headerV63, 0, 0, 10, 1)
+    liveHeaderV67 = barstate.isrealtime ? "EN VIVO" : "HISTÓRICO"
+    table.cell(headerV63, 0, 0, "IMPULXOR\nMARKET DECISION", text_color=v63Gold, bgcolor=v63Navy, text_size=size.normal, width=15)
+    table.cell(headerV63, 1, 0, "M1",  text_color=color.white, bgcolor=f_tfBgV63(d1),   text_size=size.small, width=6)
+    table.cell(headerV63, 2, 0, "M5",  text_color=color.white, bgcolor=f_tfBgV63(d5),   text_size=size.small, width=6)
+    table.cell(headerV63, 3, 0, "M15", text_color=color.white, bgcolor=f_tfBgV63(d15),  text_size=size.small, width=6)
+    table.cell(headerV63, 4, 0, "M30", text_color=color.white, bgcolor=f_tfBgV63(d30),  text_size=size.small, width=6)
+    table.cell(headerV63, 5, 0, "M45", text_color=color.white, bgcolor=f_tfBgV63(d45),  text_size=size.small, width=6)
+    table.cell(headerV63, 6, 0, "H1",  text_color=color.white, bgcolor=f_tfBgV63(d60),  text_size=size.small, width=6)
+    table.cell(headerV63, 7, 0, "H2",  text_color=color.white, bgcolor=f_tfBgV63(d120), text_size=size.small, width=6)
+    table.cell(headerV63, 8, 0, "H3",  text_color=color.white, bgcolor=f_tfBgV63(d180), text_size=size.small, width=6)
+    table.cell(headerV63, 9, 0, "H4",  text_color=color.white, bgcolor=f_tfBgV63(d240), text_size=size.small, width=6)
+    table.cell(headerV63, 10,0, "D1",  text_color=color.white, bgcolor=f_tfBgV63(dD),   text_size=size.small, width=6)
+    table.cell(headerV63, 0, 1, liveHeaderV67 + "\n" + syminfo.ticker + "  " + str.tostring(close, format.mintick), text_color=barstate.isrealtime ? v63Green : v63Gold, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(headerV63, 1, 1, f_tfCellTxt(d1, r1),     text_color=f_tfCellColor(d1),   bgcolor=v63Navy2, text_size=size.small)
+    table.cell(headerV63, 2, 1, f_tfCellTxt(d5, r5),     text_color=f_tfCellColor(d5),   bgcolor=v63Navy2, text_size=size.small)
+    table.cell(headerV63, 3, 1, f_tfCellTxt(d15, r15),   text_color=f_tfCellColor(d15),  bgcolor=v63Navy2, text_size=size.small)
+    table.cell(headerV63, 4, 1, f_tfCellTxt(d30, r30),   text_color=f_tfCellColor(d30),  bgcolor=v63Navy2, text_size=size.small)
+    table.cell(headerV63, 5, 1, f_tfCellTxt(d45, r45),   text_color=f_tfCellColor(d45),  bgcolor=v63Navy2, text_size=size.small)
+    table.cell(headerV63, 6, 1, f_tfCellTxt(d60, r60),   text_color=f_tfCellColor(d60),  bgcolor=v63Navy2, text_size=size.small)
+    table.cell(headerV63, 7, 1, f_tfCellTxt(d120, r120), text_color=f_tfCellColor(d120), bgcolor=v63Navy2, text_size=size.small)
+    table.cell(headerV63, 8, 1, f_tfCellTxt(d180, r180), text_color=f_tfCellColor(d180), bgcolor=v63Navy2, text_size=size.small)
+    table.cell(headerV63, 9, 1, f_tfCellTxt(d240, r240), text_color=f_tfCellColor(d240), bgcolor=v63Navy2, text_size=size.small)
+    table.cell(headerV63, 10,1, f_tfCellTxt(dD, rD),     text_color=f_tfCellColor(dD),   bgcolor=v63Navy2, text_size=size.small)
+
+if showImageDashboard and barstate.islast and uiDesktopV65
+    f_drawHeaderV63()
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V67 — PANEL IZQUIERDO "ANÁLISIS ACTUAL" + PLAN + TF FUERZA
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var table analysisV67 = table.new(position.middle_left, 2, 24,
+     frame_color=color.new(v63Line, 15), frame_width=2,
+     border_color=color.new(v63Line, 35), border_width=1)
+
+f_tfRow(_row, _name, _d, _rr, _bg) =>
+    table.cell(analysisV67, 0, _row, _name, text_color=color.white, bgcolor=_bg, text_size=size.small)
+    table.cell(analysisV67, 1, _row, tfDirTxt(_d) + "  " + str.tostring(f_tfStrengthV67(_d, _rr)) + "%", text_color=f_tfCellColor(_d), bgcolor=f_tfBgV63(_d), text_size=size.small)
+
+f_drawAnalysisV67() =>
+    table.clear(analysisV67, 0, 0, 1, 23)
+
+    modeLeft = lateralWait ? "LATERAL" : macroContextDirV72 == 1 ? "ALCISTA" : macroContextDirV72 == -1 ? "BAJISTA" : "NEUTRO"
+    modeColor = lateralWait ? v65Blue : macroContextDirV72 == 1 ? v63Green : macroContextDirV72 == -1 ? v63Red : v63Amber
+    biasLeft = execDirV72 == 1 ? "BUY ACTIVO" : execDirV72 == -1 ? "SELL ACTIVO" : macroContextDirV72 == 1 ? "BUY CONTEXTO" : macroContextDirV72 == -1 ? "SELL CONTEXTO" : "NEUTRO"
+    zoneLeft = stateCodeV73 == 31 or stateCodeV73 == 32 ? "ENTRADA ACTIVA" : stateCodeV73 == 21 ? "RECHAZO BUY / PREPARAR" : stateCodeV73 == 22 ? "RECHAZO SELL / PREPARAR" : buyLiveV73 or sellLiveV73 ? "POSICIÓN VIVA" : buyLocationV73 or sellLocationV73 ? "POI ACTIVO" : "BUSCANDO ZONA"
+    actionLeft = actionTxtV73
+    execColor = uxColorV75
+
+    table.cell(analysisV67, 0, 0, "ANÁLISIS ACTUAL", text_color=color.white, bgcolor=v63Navy, text_size=size.normal)
+    table.cell(analysisV67, 1, 0, barstate.isrealtime ? "MERCADO EN VIVO" : "HISTÓRICO", text_color=barstate.isrealtime ? v63Green : v63Gold, bgcolor=v63Navy, text_size=size.small)
+    table.cell(analysisV67, 0, 1, "MODO DEL MERCADO", text_color=v63Gray, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(analysisV67, 1, 1, modeLeft, text_color=modeColor, bgcolor=color.new(modeColor, 86), text_size=size.normal)
+    table.cell(analysisV67, 0, 2, "ASERTIVIDAD", text_color=v63Gray, bgcolor=v63Navy, text_size=size.small)
+    table.cell(analysisV67, 1, 2, str.tostring(math.round(scoreShown)) + "%  " + f_barV63(scoreShown), text_color=scoreShown>=80?v63Green:scoreShown>=65?v63Amber:v63Gray, bgcolor=v63Navy, text_size=size.small)
+    table.cell(analysisV67, 0, 3, "SESGO", text_color=v63Gray, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(analysisV67, 1, 3, biasLeft, text_color=execDirV72==1?v63Green:execDirV72==-1?v63Red:modeColor, bgcolor=v63Navy2, text_size=size.normal)
+    table.cell(analysisV67, 0, 4, "ZONA ACTUAL", text_color=v63Gray, bgcolor=v63Navy, text_size=size.small)
+    table.cell(analysisV67, 1, 4, zoneLeft, text_color=execColor, bgcolor=v63Navy, text_size=size.small)
+    table.cell(analysisV67, 0, 5, "PRÓXIMA ACCIÓN", text_color=v63Gray, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(analysisV67, 1, 5, actionLeft, text_color=execColor, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(analysisV67, 0, 6, "PLAN OPERATIVO ACTUAL", text_color=v63Gold, bgcolor=v63Navy, text_size=size.small)
+    table.cell(analysisV67, 1, 6, "ZONAS VIVAS", text_color=v63Gold, bgcolor=v63Navy, text_size=size.small)
+    table.cell(analysisV67, 0, 7, "SELL DESDE", text_color=v63Red, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(analysisV67, 1, 7, f_range(entrySellFrom, entrySellTo), text_color=v63Red, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(analysisV67, 0, 8, "BUY DESDE", text_color=v63Green, bgcolor=v63Navy, text_size=size.small)
+    table.cell(analysisV67, 1, 8, f_range(entryBuyFrom, entryBuyTo), text_color=v63Green, bgcolor=v63Navy, text_size=size.small)
+    table.cell(analysisV67, 0, 9, "RETROCESO", text_color=v63Amber, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(analysisV67, 1, 9, retroTxt, text_color=v63Amber, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(analysisV67, 0, 10, "PROTEGER", text_color=v65Blue, bgcolor=v63Navy, text_size=size.small)
+    table.cell(analysisV67, 1, 10, protectPartialV61 ? "ACTIVO" : "AÚN NO", text_color=protectPartialV61?v65Blue:v63Gray, bgcolor=v63Navy, text_size=size.small)
+    table.cell(analysisV67, 0, 11, "CERRAR PARCIALES", text_color=v65Purple, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(analysisV67, 1, 11, closeNow ? "AHORA" : protectPartialV61 ? "PREPARAR" : "AÚN NO", text_color=closeNow?v65Purple:protectPartialV61?v63Amber:v63Gray, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(analysisV67, 0, 12, "TEMPORALIDAD", text_color=v63Gold, bgcolor=v63Navy, text_size=size.small)
+    table.cell(analysisV67, 1, 12, "DIRECCIÓN / FUERZA", text_color=v63Gold, bgcolor=v63Navy, text_size=size.small)
+    f_tfRow(13, "M1", d1, r1, v63Navy2)
+    f_tfRow(14, "M5", d5, r5, v63Navy)
+    f_tfRow(15, "M15", d15, r15, v63Navy2)
+    f_tfRow(16, "M30", d30, r30, v63Navy)
+    f_tfRow(17, "M45", d45, r45, v63Navy2)
+    f_tfRow(18, "H1", d60, r60, v63Navy)
+    f_tfRow(19, "H2", d120, r120, v63Navy2)
+    f_tfRow(20, "H3", d180, r180, v63Navy)
+    f_tfRow(21, "H4", d240, r240, v63Navy2)
+    f_tfRow(22, "D1", dD, rD, v63Navy)
+    table.cell(analysisV67, 0, 23, "MERCADO", text_color=v63Gray, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(analysisV67, 1, 23, barstate.isrealtime ? "EN VIVO" : "HISTÓRICO", text_color=barstate.isrealtime?v63Green:v63Gold, bgcolor=v63Navy2, text_size=size.small)
+
+if showImageDashboard and barstate.islast and not uiMobileV65
+    f_drawAnalysisV67()
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V75 — SEMÁFORO DE EJECUCIÓN (panel derecho) · lee la máquina de estados única
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var table decisionV63 = table.new(position.top_right, 1, 18,
+     frame_color=color.new(v63Line, 10), frame_width=2,
+     border_color=color.new(v63Line, 24), border_width=1)
+
+f_drawDecisionV63() =>
+    table.clear(decisionV63, 0, 0, 0, 17)
+    stateBuyV73 = stateDirV73 == 1
+    stateSellV73 = stateDirV73 == -1
+    semNoTradeV73 = stateCodeV73 == 0 or stateCodeV73 == 10
+    semWaitV73 = stateCodeV73 == 11 or stateCodeV73 == 12 or stateCodeV73 == 71 or stateCodeV73 == 72
+    semPrepareBuyV73 = stateCodeV73 == 21
+    semPrepareSellV73 = stateCodeV73 == 22
+    semEnterBuyV73 = stateCodeV73 == 31
+    semEnterSellV73 = stateCodeV73 == 32
+    semBuyLiveV73 = buyLiveV73
+    semSellLiveV73 = sellLiveV73
+    semProtectV73 = stateCodeV73 == 61 or stateCodeV73 == 62
+    semRetroV73 = stateCodeV73 == 51 or stateCodeV73 == 52
+    semExitV73 = stateCodeV73 >= 63 and stateCodeV73 <= 66
+
+    stateColorV73 = semEnterBuyV73 ? v63Green :
+         semEnterSellV73 ? v63Red :
+         semPrepareBuyV73 or semPrepareSellV73 ? v63Amber :
+         stateCodeV73 == 63 or stateCodeV73 == 64 ? v63Cyan :
+         stateCodeV73 == 65 or stateCodeV73 == 66 ? v65Purple :
+         semProtectV73 ? v65Purple :
+         semBuyLiveV73 ? v63Green :
+         semSellLiveV73 ? v63Red :
+         semNoTradeV73 ? v63Red : v63Cyan
+
+    stateDirTxtV73 = stateBuyV73 ? "BUY" : stateSellV73 ? "SELL" : "WAIT"
+    missingTxtV73 = semEnterBuyV73 or semEnterSellV73 ? "LISTO · ENTRADA ACTIVA AHORA" :
+         semPrepareBuyV73 ? "FALTA: IMPULSO/ESTRUCTURA BUY" :
+         semPrepareSellV73 ? "FALTA: IMPULSO/ESTRUCTURA SELL" :
+         semBuyLiveV73 or semSellLiveV73 ? "GESTIONAR · " + liveTpTxtV75 :
+         semNoTradeV73 ? "NO BUSCAR ENTRADA AHORA" :
+         stateCodeV73 == 71 or stateCodeV73 == 72 ? "FALTA: RETROCESO AL POI" :
+         buyLocationV73 or sellLocationV73 ? "FALTA: RECHAZO / ABSORCIÓN" :
+         "FALTA: LLEGAR A OFERTA / DEMANDA / FVG"
+
+    liveTxtPanelV73 = semBuyLiveV73 ? "BUY VIVO · " + liveTpTxtV75 : semSellLiveV73 ? "SELL VIVO · " + liveTpTxtV75 : "SIN POSICIÓN VIVA"
+    continuationTxtPanelV73 = buyContinuationLiveV73 ? "CONTINÚA BUY · " + str.tostring(math.round(continuationReal)) + "%" :
+         sellContinuationLiveV73 ? "CONTINÚA SELL · " + str.tostring(math.round(continuationReal)) + "%" :
+         semRetroV73 ? continuationDirTxtV73 : "SIN CONTINUACIÓN CONFIRMADA"
+    retroTxtPanelV73 = stateCodeV73 == 51 ? "RETROCESO BAJISTA · BUY VIVO" : stateCodeV73 == 52 ? "RETROCESO ALCISTA · SELL VIVO" : "SIN RETROCESO ACTIVO"
+    protectTxtPanelV73 = stateCodeV73 == 61 ? "PROTEGER BUY / PARCIALES" : stateCodeV73 == 62 ? "PROTEGER SELL / PARCIALES" : "SIN PROTECCIÓN ACTIVA"
+    prepareTxtPanelV73 = semPrepareBuyV73 ? "PREPARAR BUY · NO ENTRAR" : semPrepareSellV73 ? "PREPARAR SELL · NO ENTRAR" : "PREPARAR"
+
+    table.cell(decisionV63, 0, 0, "SEMÁFORO OPERATIVO   " + (barstate.isrealtime ? "● ACTIVO" : "○ HISTÓRICO"), text_color=barstate.isrealtime ? v63Green : v63Gold, bgcolor=v63Navy, text_size=size.normal, width=29)
+    table.cell(decisionV63, 0, 1, "▶ ACTIVO AHORA\n" + stateTxtV73, text_color=color.white, bgcolor=color.new(stateColorV73, 0), text_size=size.large)
+    table.cell(decisionV63, 0, 2, "QUÉ HACER AHORA\n" + actionTxtV73, text_color=color.white, bgcolor=color.new(stateColorV73, 68), text_size=size.normal)
+    table.cell(decisionV63, 0, 3, "ZONA " + stateDirTxtV73 + " · " + planSourceTxtV73 + "\n" + planEntryTxtV73, text_color=stateBuyV73 ? v63Green : stateSellV73 ? v63Red : v63Cyan, bgcolor=v63Navy2, text_size=size.normal)
+    table.cell(decisionV63, 0, 4, "INVALIDACIÓN / SL\n" + stateSlTxtV73, text_color=liveSlProtectedV75 ? v63Amber : v63Red, bgcolor=v63Navy, text_size=size.small)
+    table.cell(decisionV63, 0, 5, "OBJETIVO / LIQUIDEZ · R " + planRrTxtV75 + "\n" + stateTargetTxtV73, text_color=v63Green, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(decisionV63, 0, 6, "IMPULSO TEMPRANO\n" + earlyImpulseTxtV73, text_color=buyMomentumV73 ? v63Green : sellMomentumV73 ? v63Red : v63Gray, bgcolor=buyMomentumV73 ? color.new(v63Green, 82) : sellMomentumV73 ? color.new(v63Red, 82) : v63Navy, text_size=size.small)
+    table.cell(decisionV63, 0, 7, "POI / ESTRUCTURA\n" + poiTxtV74 + " | " + structureTxtV73, text_color=stateBuyV73 ? v63Green : stateSellV73 ? v63Red : v63Gray, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(decisionV63, 0, 8, missingTxtV73 + "\n" + eventTxtV73, text_color=semEnterBuyV73 or semEnterSellV73 ? v63Green : semNoTradeV73 ? v63Red : v63Amber, bgcolor=v63Navy, text_size=size.small)
+    table.cell(decisionV63, 0, 9, "NO TRADEAR", text_color=color.white, bgcolor=color.new(v63Red, semNoTradeV73 ? 0 : 94), text_size=size.normal)
+    table.cell(decisionV63, 0, 10, stateCodeV73 == 71 or stateCodeV73 == 72 ? "ESPERAR RETROCESO" : "ESPERAR", text_color=color.white, bgcolor=color.new(v63Cyan, semWaitV73 ? 25 : 94), text_size=size.normal)
+    table.cell(decisionV63, 0, 11, prepareTxtPanelV73, text_color=semPrepareBuyV73 or semPrepareSellV73 ? color.black : color.white, bgcolor=color.new(v63Amber, semPrepareBuyV73 or semPrepareSellV73 ? 0 : 94), text_size=size.normal)
+    table.cell(decisionV63, 0, 12, "ENTRAR YA · BUY", text_color=color.white, bgcolor=color.new(v63Green, semEnterBuyV73 ? 0 : 94), text_size=size.normal)
+    table.cell(decisionV63, 0, 13, "ENTRAR YA · SELL", text_color=color.white, bgcolor=color.new(v63Red, semEnterSellV73 ? 0 : 94), text_size=size.normal)
+    table.cell(decisionV63, 0, 14, liveTxtPanelV73, text_color=color.white, bgcolor=semBuyLiveV73 ? color.new(v63Green, 10) : semSellLiveV73 ? color.new(v63Red, 10) : color.new(v63Gray, 94), text_size=size.normal)
+    table.cell(decisionV63, 0, 15, continuationTxtPanelV73, text_color=color.white, bgcolor=buyContinuationLiveV73 ? color.new(v63Green, 20) : sellContinuationLiveV73 ? color.new(v63Red, 20) : color.new(v63Gray, 94), text_size=size.normal)
+    table.cell(decisionV63, 0, 16, semExitV73 ? stateTxtV73 : semProtectV73 ? protectTxtPanelV73 : retroTxtPanelV73, text_color=semProtectV73 or semRetroV73 or semExitV73 ? color.white : v63Gray, bgcolor=semExitV73 ? color.new(stateColorV73, 0) : semProtectV73 ? color.new(v65Purple, 0) : semRetroV73 ? color.new(v63Amber, 0) : color.new(v63Gray, 94), text_size=size.normal)
+
+    finalTxtV73 = semEnterBuyV73 ? "FINAL: ENTRAR BUY AHORA EN ZONA" :
+         semEnterSellV73 ? "FINAL: ENTRAR SELL AHORA EN ZONA" :
+         semPrepareBuyV73 ? "FINAL: PREPARAR BUY · TODAVÍA NO ENTRAR" :
+         semPrepareSellV73 ? "FINAL: PREPARAR SELL · TODAVÍA NO ENTRAR" :
+         stateCodeV73 == 63 or stateCodeV73 == 64 ? "FINAL: OBJETIVO COMPLETADO" :
+         stateCodeV73 == 65 or stateCodeV73 == 66 ? "FINAL: STOP · ESPERAR NUEVO POI" :
+         stateCodeV73 == 41 ? "FINAL: BUY VIVO · MANTENER" :
+         stateCodeV73 == 42 ? "FINAL: SELL VIVO · MANTENER" :
+         stateCodeV73 == 51 ? "FINAL: BUY VIVO EN RETROCESO" :
+         stateCodeV73 == 52 ? "FINAL: SELL VIVO EN RETROCESO" :
+         semProtectV73 ? "FINAL: PROTEGER / TOMAR PARCIALES" :
+         stateCodeV73 == 71 or stateCodeV73 == 72 ? "FINAL: ESPERAR RETROCESO AL POI" :
+         semNoTradeV73 ? "FINAL: NO TRADEAR" : "FINAL: ESPERAR"
+    table.cell(decisionV63, 0, 17, finalTxtV73, text_color=color.white, bgcolor=color.new(stateColorV73, 18), text_size=size.normal)
+
+if showImageDashboard and barstate.islast and not uiMobileV65
+    f_drawDecisionV63()
+
+//━━━━━━━━━━━━━━━━━━
+// V63 — CARDS INFERIORES
+//━━━━━━━━━━━━━━━━━━
+var table cardsV63 = table.new(position.bottom_center, 3, 6,
+     frame_color=color.new(v63Line, 20), border_color=color.new(v63Line, 25), border_width=1)
+
+f_drawCardsV63() =>
+    table.clear(cardsV63, 0, 0, 2, 5)
+    buyFlowPct = math.round(100.0 * buyScore / math.max(1.0, buyScore + sellScore))
+    sellFlowPct = 100 - buyFlowPct
+    table.cell(cardsV63, 0, 0, "PRESIÓN VIVA", text_color=v63Gold, bgcolor=v63Navy, text_size=size.small, width=16)
+    table.cell(cardsV63, 1, 0, "LECTURA MADRE", text_color=v63Gold, bgcolor=v63Navy, text_size=size.small, width=16)
+    table.cell(cardsV63, 2, 0, "RIESGO / EVENTOS", text_color=v63Gold, bgcolor=v63Navy, text_size=size.small, width=16)
+    table.cell(cardsV63, 0, 1, "COMPRA  " + str.tostring(buyFlowPct) + "%", text_color=v63Green, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(cardsV63, 0, 2, "VENTA   " + str.tostring(sellFlowPct) + "%", text_color=v63Red, bgcolor=v63Navy, text_size=size.small)
+    table.cell(cardsV63, 0, 3, "DELTA   " + str.tostring(deltaSynthetic), text_color=deltaSynthetic >= 0 ? v63Green : v63Red, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(cardsV63, 0, 4, "VOLUMEN " + (volume > volBase20 ? "ALTO" : "NORMAL"), text_color=volume > volBase20 ? v63Amber : v63Cyan, bgcolor=v63Navy, text_size=size.small)
+    table.cell(cardsV63, 0, 5, "PULSO " + (masterDir == 1 ? "BUY" : masterDir == -1 ? "SELL" : "NEUTRO"), text_color=masterDir == 1 ? v63Green : masterDir == -1 ? v63Red : v63Gray, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(cardsV63, 1, 1, "REACCIÓN  " + reactionTxtV65, text_color=reactionColorV65, bgcolor=color.new(reactionColorV65, 88), text_size=size.small)
+    table.cell(cardsV63, 1, 2, "ZONA  " + (priceInsideEntry ? "EN PRECIO" : "BUSCANDO"), text_color=priceInsideEntry ? v63Cyan : v63Gray, bgcolor=v63Navy, text_size=size.small)
+    table.cell(cardsV63, 1, 3, "FASE  " + uxFase, text_color=runnerNow ? v63Green : retroNow ? v63Amber : preNow ? v63Cyan : color.white, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(cardsV63, 1, 4, "ESPACIO  " + uxSpaceTxt, text_color=noSpaceWait ? v63Red : v63Green, bgcolor=v63Navy, text_size=size.small)
+    table.cell(cardsV63, 1, 5, "ACCIÓN  " + uxEstado, text_color=execEnterBuyV72 or execEnterSellV72 ? v63Green : execArmedBuyV72 or execArmedSellV72 ? v63Amber : noSpaceWait ? v63Red : v63Cyan, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(cardsV63, 2, 1, "VOL " + volTxtV61 + "  x" + str.tostring(volRatioV61, "#.00"), text_color=volExtremeV61 ? v63Red : v63Amber, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(cardsV63, 2, 2, "NEWS " + manualNewsLevelV63, text_color=manualNewsLevelV63 == "ALTO" ? v63Red : v63Amber, bgcolor=v63Navy, text_size=size.small)
+    table.cell(cardsV63, 2, 3, manualNewsTitleV63, text_color=color.white, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(cardsV63, 2, 4, "RANGO " + (compression ? "COMPRESIÓN" : "NORMAL"), text_color=compression ? v63Amber : v63Cyan, bgcolor=v63Navy, text_size=size.small)
+    table.cell(cardsV63, 2, 5, eventBlockV61 ? "BLOQUEO ACTIVO" : "SIN BLOQUEO", text_color=eventBlockV61 ? v63Red : v63Green, bgcolor=v63Navy2, text_size=size.small)
+
+if showImageDashboard and barstate.islast and uiDesktopV65
+    f_drawCardsV63()
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V65 — MÓVIL COMPACTO / PANEL VIVO
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var table mobileV65 = table.new(position.bottom_right, 1, 13,
+     frame_color=color.new(v63Gold, 8), frame_width=2,
+     border_color=color.new(v63Line, 12), border_width=1)
+
+f_drawMobileV65() =>
+    liveMobileV66 = barstate.isrealtime ? "EN VIVO" : "HISTÓRICO"
+    pulseMobileV66 = barstate.isrealtime ? (timenow % 2000 < 1000 ? "●" : "◉") : "○"
+    tempoMobileV66 = volExtremeV61 ? "EXPANSIÓN EXTREMA" : volAbnormalV61 ? "EXPANSIÓN" : lateralWait ? "COMPRESIÓN" : continuationV61 ? "CONTINUIDAD" : pullbackActiveV61 ? "RETROCESO" : "NORMAL"
+    tempoColorMobileV66 = volExtremeV61 ? v63Red : volAbnormalV61 ? v63Amber : lateralWait ? v65Purple : continuationV61 ? v63Green : pullbackActiveV61 ? v63Cyan : v63Gray
+    table.clear(mobileV65, 0, 0, 0, 12)
+    stageMobileV65 = eventBlockV61 ? "BLOCK" : execEnterBuyV72 or execEnterSellV72 ? "EXECUTE" : execArmedBuyV72 or execArmedSellV72 ? "ARMED" : runnerNow ? "MANAGE" : "WATCH"
+    stageColorMobileV65 = eventBlockV61 ? v63Red : execEnterBuyV72 ? v63Green : execEnterSellV72 ? v63Red : execArmedBuyV72 or execArmedSellV72 ? v63Amber : runnerNow ? v65Blue : v63Cyan
+    dirMobileV65 = masterDir == 1 ? "BUY" : masterDir == -1 ? "SELL" : "NEUTRO"
+    dirColorMobileV65 = masterDir == 1 ? v63Green : masterDir == -1 ? v63Red : v63Gray
+    actionMobileV65 = actionTxtV73
+    actionColorMobileV65 = uxColorV75
+
+    table.cell(mobileV65, 0, 0, pulseMobileV66 + " IMPULXOR  DECISIÓN VIVA", text_color=barstate.isrealtime ? v63Green : v63Gold, bgcolor=v63Navy, text_size=size.normal, width=23)
+    table.cell(mobileV65, 0, 1, syminfo.ticker + "  " + timeframe.period + "  " + str.tostring(close, format.mintick), text_color=color.white, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(mobileV65, 0, 2, "LECTURA MADRE  " + dirMobileV65, text_color=dirColorMobileV65, bgcolor=color.new(dirColorMobileV65, 84), text_size=size.normal)
+    table.cell(mobileV65, 0, 3, "FASE VIVA  " + stageMobileV65, text_color=stageColorMobileV65, bgcolor=color.new(stageColorMobileV65, 86), text_size=size.small)
+    table.cell(mobileV65, 0, 4, "ZONA REACCIÓN  " + reactionTxtV65, text_color=reactionColorV65, bgcolor=color.new(reactionColorV65, 84), text_size=size.normal)
+    table.cell(mobileV65, 0, 5, "PROX. ZONA  " + str.tostring(zoneProxPctV65) + "%", text_color=zoneProxPctV65 >= 80 ? v63Green : zoneProxPctV65 >= 55 ? v63Amber : v63Cyan, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(mobileV65, 0, 6, "CALIDAD  " + str.tostring(math.round(scoreShown)) + "%", text_color=scoreShown >= 82 ? v63Green : scoreShown >= 68 ? v63Amber : v63Gray, bgcolor=v63Navy, text_size=size.small)
+    table.cell(mobileV65, 0, 7, "PULSO TF  M5 " + tfDirTxt(d5) + " | M15 " + tfDirTxt(d15) + " | H1 " + tfDirTxt(d60), text_color=color.white, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(mobileV65, 0, 8, "RITMO  " + tempoMobileV66 + "  |  RIESGO " + executionRisk, text_color=executionRisk == "ALTO" ? v63Red : tempoColorMobileV66, bgcolor=v63Navy, text_size=size.small)
+    table.cell(mobileV65, 0, 9, "GESTIÓN  " + manageTxtV61, text_color=runnerNow ? v63Green : protectPartialV61 ? v63Amber : color.white, bgcolor=v63Navy2, text_size=size.small)
+    table.cell(mobileV65, 0, 10, "ACCIÓN  " + actionMobileV65, text_color=actionColorMobileV65, bgcolor=color.new(actionColorMobileV65, 86), text_size=size.normal)
+    table.cell(mobileV65, 0, 11, "SIGUIENTE  " + (execEnterBuyV72 or execEnterSellV72 ? "GESTIONAR" : execArmedBuyV72 or execArmedSellV72 ? "CONFIRMAR BOS/MSS" : buyLocationV72 or sellLocationV72 ? "ESPERAR RECHAZO" : "LLEGAR A ZONA"), text_color=v63Cyan, bgcolor=v63Navy, text_size=size.small)
+    table.cell(mobileV65, 0, 12, pulseMobileV66 + " " + liveMobileV66 + "  |  " + str.tostring(close, format.mintick), text_color=barstate.isrealtime ? v63Green : v63Gold, bgcolor=v63Navy2, text_size=size.small)
+
+if showImageDashboard and barstate.islast and uiMobileV65
+    f_drawMobileV65()
+
+//━━━━━━━━━━━━━━━━━━
+// V63 — HEATMAP / PERFIL DE LIQUIDEZ LIGERO
+// Perfil estimado con volumen de velas; NO es order book real.
+// V73: los extremos se calculan en cada vela (ta.* fuera del bloque condicional).
+//━━━━━━━━━━━━━━━━━━
+heatHiV63 = ta.highest(high, heatLookbackV63)
+heatLoV63 = ta.lowest(low, heatLookbackV63)
+var array<box> heatBoxesV63 = array.new_box()
+
+if barstate.islast and showHeatMapV63
+    if array.size(heatBoxesV63) > 0
+        for j = array.size(heatBoxesV63) - 1 to 0
+            box.delete(array.get(heatBoxesV63, j))
+        array.clear(heatBoxesV63)
+
+    heatRange = math.max(heatHiV63 - heatLoV63, syminfo.mintick)
+    heatStep = heatRange / heatBinsV63
+    vols = array.new_float(heatBinsV63, 0.0)
+    buys = array.new_float(heatBinsV63, 0.0)
+
+    for i = 0 to heatLookbackV63 - 1
+        mid = (high[i] + low[i]) * 0.5
+        idx = int(math.floor((mid - heatLoV63) / heatStep))
+        idx := math.max(0, math.min(heatBinsV63 - 1, idx))
+        v = nz(volume[i], 0.0)
+        array.set(vols, idx, array.get(vols, idx) + v)
+        buyShare = close[i] >= open[i] ? 0.68 : 0.32
+        array.set(buys, idx, array.get(buys, idx) + v * buyShare)
+
+    maxV = 0.0
+    for b = 0 to heatBinsV63 - 1
+        maxV := math.max(maxV, array.get(vols, b))
+
+    for b = 0 to heatBinsV63 - 1
+        v = array.get(vols, b)
+        if v > 0 and maxV > 0
+            y0 = heatLoV63 + b * heatStep
+            y1 = y0 + heatStep * 0.88
+            ratio = array.get(buys, b) / v
+            strength = v / maxV
+            w = 1 + int(math.round(strength * 9))
+            col = ratio >= 0.56 ? color.new(v63Cyan, 35) : ratio <= 0.44 ? color.new(v63Red, 35) : color.new(v63Gray, 55)
+            bx = box.new(bar_index + 3, y1, bar_index + 3 + w, y0, xloc=xloc.bar_index, bgcolor=col, border_color=color.new(col, 0), border_width=1)
+            array.push(heatBoxesV63, bx)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V67 — ZONAS VIVAS CENTRALES (solo con "Mostrar caja mapa")
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var box liveSellZoneV67 = na
+var box liveDecisionZoneV67 = na
+var box liveBuyZoneV67 = na
+var label liveSellTagV67 = na
+var label liveDecisionTagV67 = na
+var label liveBuyTagV67 = na
+
+if barstate.islast and showMapBox
+    box.delete(liveSellZoneV67)
+    box.delete(liveDecisionZoneV67)
+    box.delete(liveBuyZoneV67)
+    label.delete(liveSellTagV67)
+    label.delete(liveDecisionTagV67)
+    label.delete(liveBuyTagV67)
+
+    zLeft = bar_index - 80
+    zRight = bar_index + boxBarsRight
+    liveSellZoneV67 := box.new(zLeft, sellZoneTo, zRight, sellZoneFrom, xloc=xloc.bar_index, bgcolor=color.new(v63Red, 84), border_color=color.new(v63Red, 18), border_width=2)
+    liveBuyZoneV67 := box.new(zLeft, buyZoneTo, zRight, buyZoneFrom, xloc=xloc.bar_index, bgcolor=color.new(v63Green, 86), border_color=color.new(v63Green, 18), border_width=2)
+    decisionLowV67 = math.min(ema9, ema21) - atr * 0.35
+    decisionHighV67 = math.max(ema9, ema21) + atr * 0.35
+    liveDecisionZoneV67 := box.new(zLeft, decisionHighV67, zRight, decisionLowV67, xloc=xloc.bar_index, bgcolor=color.new(v65Blue, 90), border_color=color.new(v63Gray, 55), border_width=1)
+    liveSellTagV67 := label.new(zRight, sellZoneFrom, "SELL ZONE\n" + f_range(sellZoneFrom, sellZoneTo), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(v63Red, 8), textcolor=color.white, size=size.small)
+    liveDecisionTagV67 := label.new(zRight, decisionHighV67, "ZONA DE DECISIÓN\n" + f_range(decisionLowV67, decisionHighV67), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(v65Blue, 18), textcolor=color.white, size=size.small)
+    liveBuyTagV67 := label.new(zRight, buyZoneTo, "BUY ZONE\n" + f_range(buyZoneFrom, buyZoneTo), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(v63Green, 8), textcolor=color.black, size=size.small)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V68 — GRÁFICO LIMPIO: POI / OFERTA / DEMANDA / REACCIÓN / EVENTOS
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+newDemandPoiV68 = poiBuyQualityV74 >= 60 and (bullObValidV74 or bullFvgValidV74)
+newSupplyPoiV68 = poiSellQualityV74 >= 60 and (bearObValidV74 or bearFvgValidV74)
+
+candidateDemandLowV68 = poiBuyLoV74
+candidateDemandHighV68 = poiBuyHiV74
+candidateSupplyLowV68 = poiSellLoV74
+candidateSupplyHighV68 = poiSellHiV74
+
+var float liveDemandLowV68 = na
+var float liveDemandHighV68 = na
+var float liveDemandStrengthV68 = na
+var int liveDemandBirthV68 = na
+var float liveSupplyLowV68 = na
+var float liveSupplyHighV68 = na
+var float liveSupplyStrengthV68 = na
+var int liveSupplyBirthV68 = na
+
+if newDemandPoiV68
+    liveDemandLowV68 := candidateDemandLowV68
+    liveDemandHighV68 := candidateDemandHighV68
+    liveDemandStrengthV68 := poiBuyQualityV74
+    liveDemandBirthV68 := bar_index
+if newSupplyPoiV68
+    liveSupplyLowV68 := candidateSupplyLowV68
+    liveSupplyHighV68 := candidateSupplyHighV68
+    liveSupplyStrengthV68 := poiSellQualityV74
+    liveSupplyBirthV68 := bar_index
+
+// V73: la zona se borra si se invalida o si envejece más de poiMaxAgeBars.
+demandInvalidV68 = not na(liveDemandLowV68) and (close < liveDemandLowV68 - atr * 0.18 or bar_index - liveDemandBirthV68 > poiMaxAgeBars)
+supplyInvalidV68 = not na(liveSupplyHighV68) and (close > liveSupplyHighV68 + atr * 0.18 or bar_index - liveSupplyBirthV68 > poiMaxAgeBars)
+if demandInvalidV68
+    liveDemandLowV68 := na
+    liveDemandHighV68 := na
+    liveDemandStrengthV68 := na
+    liveDemandBirthV68 := na
+if supplyInvalidV68
+    liveSupplyLowV68 := na
+    liveSupplyHighV68 := na
+    liveSupplyStrengthV68 := na
+    liveSupplyBirthV68 := na
+
+reactionLowV68 = masterDir == 1 ? math.min(buyPullFrom, buyPullTo) : masterDir == -1 ? math.min(sellPullFrom, sellPullTo) : math.min(ema9, ema21)
+reactionHighV68 = masterDir == 1 ? math.max(buyPullFrom, buyPullTo) : masterDir == -1 ? math.max(sellPullFrom, sellPullTo) : math.max(ema9, ema21)
+reactionNameV68 = masterDir == 1 ? "REACCIÓN BUY / DEMANDA" : masterDir == -1 ? "REACCIÓN SELL / OFERTA" : "ZONA DE REACCIÓN"
+
+absBuyEventV68 = absorbBuy and not absorbBuy[1]
+absSellEventV68 = absorbSell and not absorbSell[1]
+var int lastAbsBuyBarV68 = na
+var int lastAbsSellBarV68 = na
+var float lastAbsBuyPriceV68 = na
+var float lastAbsSellPriceV68 = na
+if absBuyEventV68
+    lastAbsBuyBarV68 := bar_index
+    lastAbsBuyPriceV68 := low
+if absSellEventV68
+    lastAbsSellBarV68 := bar_index
+    lastAbsSellPriceV68 := high
+
+expBuyNowV68 = (realAccelBuy or explosivePressureBuy) and close > open
+expSellNowV68 = (realAccelSell or explosivePressureSell) and close < open
+var int lastExpBuyBarV68 = na
+var int lastExpSellBarV68 = na
+var float lastExpBuyPriceV68 = na
+var float lastExpSellPriceV68 = na
+if expBuyNowV68 and not expBuyNowV68[1]
+    lastExpBuyBarV68 := bar_index
+    lastExpBuyPriceV68 := low
+if expSellNowV68 and not expSellNowV68[1]
+    lastExpSellBarV68 := bar_index
+    lastExpSellPriceV68 := high
+
+var box demandBoxV68 = na
+var box supplyBoxV68 = na
+var box reactionBoxV68 = na
+var label demandTagV68 = na
+var label supplyTagV68 = na
+var label reactionTagV68 = na
+var line supportLineV68 = na
+var line resistanceLineV68 = na
+var label supportTagV68 = na
+var label resistanceTagV68 = na
+var label absBuyDotV68 = na
+var label absSellDotV68 = na
+var label expBuyTagV68 = na
+var label expSellTagV68 = na
+
+if barstate.islast
+    box.delete(demandBoxV68)
+    box.delete(supplyBoxV68)
+    box.delete(reactionBoxV68)
+    label.delete(demandTagV68)
+    label.delete(supplyTagV68)
+    label.delete(reactionTagV68)
+    line.delete(supportLineV68)
+    line.delete(resistanceLineV68)
+    label.delete(supportTagV68)
+    label.delete(resistanceTagV68)
+    label.delete(absBuyDotV68)
+    label.delete(absSellDotV68)
+    label.delete(expBuyTagV68)
+    label.delete(expSellTagV68)
+
+    zoneRightV68 = bar_index + boxBarsRight
+
+    if showLivePoiV68 and not na(liveDemandLowV68) and not na(liveDemandHighV68)
+        demandLeftV68 = math.max(0, nz(liveDemandBirthV68, bar_index) - 4)
+        demandBoxV68 := box.new(demandLeftV68, liveDemandHighV68, zoneRightV68, liveDemandLowV68, xloc=xloc.bar_index, bgcolor=color.new(color.lime, 86), border_color=color.new(color.lime, 0), border_width=3)
+        demandTagV68 := label.new(zoneRightV68, liveDemandHighV68, "DEMANDA FUERTE · POI\n" + f_range(liveDemandLowV68, liveDemandHighV68) + "\nFUERZA " + str.tostring(math.round(nz(liveDemandStrengthV68, 0))) + "%", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.lime, 0), textcolor=color.black, size=size.normal)
+
+    if showLivePoiV68 and not na(liveSupplyLowV68) and not na(liveSupplyHighV68)
+        supplyLeftV68 = math.max(0, nz(liveSupplyBirthV68, bar_index) - 4)
+        supplyBoxV68 := box.new(supplyLeftV68, liveSupplyHighV68, zoneRightV68, liveSupplyLowV68, xloc=xloc.bar_index, bgcolor=color.new(color.red, 86), border_color=color.new(color.red, 0), border_width=3)
+        supplyTagV68 := label.new(zoneRightV68, liveSupplyLowV68, "OFERTA FUERTE · POI\n" + f_range(liveSupplyLowV68, liveSupplyHighV68) + "\nFUERZA " + str.tostring(math.round(nz(liveSupplyStrengthV68, 0))) + "%", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.red, 0), textcolor=color.white, size=size.normal)
+
+    if showReactionV68 and masterDir != 0
+        reactionColorV68 = masterDir == 1 ? color.aqua : color.orange
+        reactionBoxV68 := box.new(bar_index - 16, reactionHighV68, zoneRightV68, reactionLowV68, xloc=xloc.bar_index, bgcolor=color.new(reactionColorV68, 93), border_color=color.new(reactionColorV68, 18), border_width=2, border_style=line.style_dashed)
+        reactionTagV68 := label.new(zoneRightV68, reactionHighV68, reactionNameV68 + "\n" + f_range(reactionLowV68, reactionHighV68), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(reactionColorV68, 14), textcolor=color.white, size=size.small)
+
+    if showStrongSRV68 and supportStrength >= 70
+        supportLineV68 := line.new(bar_index - 26, chLow, zoneRightV68, chLow, xloc=xloc.bar_index, extend=extend.none, color=color.new(color.lime, 4), width=2, style=line.style_dotted)
+        supportTagV68 := label.new(zoneRightV68, chLow, "SOPORTE FUERTE " + str.tostring(supportStrength) + "%", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.lime, 12), textcolor=color.black, size=size.tiny)
+
+    if showStrongSRV68 and resistStrength >= 70
+        resistanceLineV68 := line.new(bar_index - 26, chHigh, zoneRightV68, chHigh, xloc=xloc.bar_index, extend=extend.none, color=color.new(color.red, 4), width=2, style=line.style_dotted)
+        resistanceTagV68 := label.new(zoneRightV68, chHigh, "RESISTENCIA FUERTE " + str.tostring(resistStrength) + "%", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.red, 12), textcolor=color.white, size=size.tiny)
+
+    if showLastAbsV68 and not na(lastAbsBuyBarV68) and bar_index - lastAbsBuyBarV68 <= eventVisibleBarsV68
+        absBuyDotV68 := label.new(lastAbsBuyBarV68, lastAbsBuyPriceV68, "●", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_none, textcolor=color.lime, size=size.large)
+    if showLastAbsV68 and not na(lastAbsSellBarV68) and bar_index - lastAbsSellBarV68 <= eventVisibleBarsV68
+        absSellDotV68 := label.new(lastAbsSellBarV68, lastAbsSellPriceV68, "●", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_none, textcolor=color.red, size=size.large)
+
+    if showLastExpV68 and not na(lastExpBuyBarV68) and bar_index - lastExpBuyBarV68 <= eventVisibleBarsV68
+        expBuyTagV68 := label.new(lastExpBuyBarV68, lastExpBuyPriceV68, "EXP ALCISTA", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=color.new(color.green, 4), textcolor=color.white, size=size.tiny)
+    if showLastExpV68 and not na(lastExpSellBarV68) and bar_index - lastExpSellBarV68 <= eventVisibleBarsV68
+        expSellTagV68 := label.new(lastExpSellBarV68, lastExpSellPriceV68, "EXP BAJISTA", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=color.new(color.maroon, 4), textcolor=color.white, size=size.tiny)
+
+var table watermarkV68 = table.new(position.middle_center, 1, 1, frame_width=0, border_width=0)
+if barstate.islast
+    table.clear(watermarkV68, 0, 0, 0, 0)
+    if showWatermarkV68
+        table.cell(watermarkV68, 0, 0, "I  M  P  U  L  X  O  R", text_color=color.new(color.rgb(255, 210, 72), 82), bgcolor=color.new(color.black, 100), text_size=size.large)
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V75 — ESTRUCTURA DE MERCADO (swing + interna), EQH/EQL, SFP, PREMIUM/DISCOUNT, NIVELES MTF, KILLZONES
+// Implementación propia y ligera: los objetos históricos van en arrays con tope; el resto se repinta solo en la última vela.
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+f_pushLabelV75(_arr, _lb, _cap) =>
+    array.push(_arr, _lb)
+    if array.size(_arr) > _cap
+        label.delete(array.shift(_arr))
+f_pushLineV75(_arr, _ln, _cap) =>
+    array.push(_arr, _ln)
+    if array.size(_arr) > _cap
+        line.delete(array.shift(_arr))
+
+// ── Estructura SWING
+swHV75 = ta.pivothigh(high, swingLenV75, swingLenV75)
+swLV75 = ta.pivotlow(low, swingLenV75, swingLenV75)
+var float swLastHV75 = na
+var float swPrevHV75 = na
+var int swLastHBarV75 = na
+var float swLastLV75 = na
+var float swPrevLV75 = na
+var int swLastLBarV75 = na
+var bool swHBrokenV75 = true
+var bool swLBrokenV75 = true
+var int swTrendV75 = 0
+var label[] swLabelsV75 = array.new_label()
+var line[] swLinesV75 = array.new_line()
+var label[] swEventLabelsV75 = array.new_label()
+var int swLastEventBarV75 = na
+var string swLastEventTxtV75 = ""
+var float swLastEventRangeV75 = na
+
+if not na(swHV75)
+    swPrevHV75 := swLastHV75
+    swLastHV75 := swHV75
+    swLastHBarV75 := bar_index - swingLenV75
+    swHBrokenV75 := false
+    if showSwingStructV75 and showSwingLabelsV75
+        swTxtH = na(swPrevHV75) ? "H" : swHV75 > swPrevHV75 ? "HH" : "LH"
+        f_pushLabelV75(swLabelsV75, label.new(swLastHBarV75, swHV75, swTxtH, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=color.new(color.black, 100), textcolor=color.new(color.red, 10), size=size.tiny), maxStructObjV75 * 2)
+if not na(swLV75)
+    swPrevLV75 := swLastLV75
+    swLastLV75 := swLV75
+    swLastLBarV75 := bar_index - swingLenV75
+    swLBrokenV75 := false
+    if showSwingStructV75 and showSwingLabelsV75
+        swTxtL = na(swPrevLV75) ? "L" : swLV75 > swPrevLV75 ? "HL" : "LL"
+        f_pushLabelV75(swLabelsV75, label.new(swLastLBarV75, swLV75, swTxtL, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=color.new(color.black, 100), textcolor=color.new(color.lime, 10), size=size.tiny), maxStructObjV75 * 2)
+
+// Ruptura de swing: BOS a favor de la tendencia swing, CHoCH en contra.
+swBreakUpV75 = not swHBrokenV75 and not na(swLastHV75) and close > swLastHV75
+swBreakDnV75 = not swLBrokenV75 and not na(swLastLV75) and close < swLastLV75
+if swBreakUpV75
+    swHBrokenV75 := true
+    swEvUp = swTrendV75 == -1 ? "CHoCH" : "BOS"
+    swTrendV75 := 1
+    swLastEventBarV75 := bar_index
+    swLastEventTxtV75 := swEvUp + " ▲"
+    swLastEventRangeV75 := high - low
+    if showSwingStructV75
+        f_pushLineV75(swLinesV75, line.new(swLastHBarV75, swLastHV75, bar_index, swLastHV75, xloc=xloc.bar_index, color=color.new(color.lime, 20), width=1, style=line.style_dashed), maxStructObjV75)
+        f_pushLabelV75(swEventLabelsV75, label.new(bar_index, swLastHV75, swEvUp, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=color.new(color.lime, 20), textcolor=color.black, size=size.tiny), maxStructObjV75)
+if swBreakDnV75
+    swLBrokenV75 := true
+    swEvDn = swTrendV75 == 1 ? "CHoCH" : "BOS"
+    swTrendV75 := -1
+    swLastEventBarV75 := bar_index
+    swLastEventTxtV75 := swEvDn + " ▼"
+    swLastEventRangeV75 := high - low
+    if showSwingStructV75
+        f_pushLineV75(swLinesV75, line.new(swLastLBarV75, swLastLV75, bar_index, swLastLV75, xloc=xloc.bar_index, color=color.new(color.red, 20), width=1, style=line.style_dashed), maxStructObjV75)
+        f_pushLabelV75(swEventLabelsV75, label.new(bar_index, swLastLV75, swEvDn, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=color.new(color.red, 20), textcolor=color.white, size=size.tiny), maxStructObjV75)
+
+// ── Estructura INTERNA (pivote corto)
+inHV75 = ta.pivothigh(high, internalLenV75, internalLenV75)
+inLV75 = ta.pivotlow(low, internalLenV75, internalLenV75)
+var float inLastHV75 = na
+var int inLastHBarV75 = na
+var float inLastLV75 = na
+var int inLastLBarV75 = na
+var bool inHBrokenV75 = true
+var bool inLBrokenV75 = true
+var int inTrendV75 = 0
+var line[] inLinesV75 = array.new_line()
+var label[] inLabelsV75 = array.new_label()
+
+if not na(inHV75)
+    inLastHV75 := inHV75
+    inLastHBarV75 := bar_index - internalLenV75
+    inHBrokenV75 := false
+if not na(inLV75)
+    inLastLV75 := inLV75
+    inLastLBarV75 := bar_index - internalLenV75
+    inLBrokenV75 := false
+
+inBreakUpV75 = not inHBrokenV75 and not na(inLastHV75) and close > inLastHV75
+inBreakDnV75 = not inLBrokenV75 and not na(inLastLV75) and close < inLastLV75
+if inBreakUpV75
+    inHBrokenV75 := true
+    inEvUp = inTrendV75 == -1 ? "iCHoCH" : "iBOS"
+    inTrendV75 := 1
+    if showInternalStructV75
+        f_pushLineV75(inLinesV75, line.new(inLastHBarV75, inLastHV75, bar_index, inLastHV75, xloc=xloc.bar_index, color=color.new(color.teal, 35), width=1, style=line.style_dotted), maxStructObjV75)
+        f_pushLabelV75(inLabelsV75, label.new(bar_index, inLastHV75, inEvUp, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_down, color=color.new(color.black, 100), textcolor=color.new(color.teal, 0), size=size.tiny), maxStructObjV75)
+if inBreakDnV75
+    inLBrokenV75 := true
+    inEvDn = inTrendV75 == 1 ? "iCHoCH" : "iBOS"
+    inTrendV75 := -1
+    if showInternalStructV75
+        f_pushLineV75(inLinesV75, line.new(inLastLBarV75, inLastLV75, bar_index, inLastLV75, xloc=xloc.bar_index, color=color.new(color.orange, 35), width=1, style=line.style_dotted), maxStructObjV75)
+        f_pushLabelV75(inLabelsV75, label.new(bar_index, inLastLV75, inEvDn, xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_up, color=color.new(color.black, 100), textcolor=color.new(color.orange, 0), size=size.tiny), maxStructObjV75)
+
+// ── EQH / EQL (pivotes externos ya calculados en V48)
+extPhBarV75 = ta.valuewhen(not na(extPivotHigh), bar_index - 3, 0)
+extPhPrevBarV75 = ta.valuewhen(not na(extPivotHigh), bar_index - 3, 1)
+extPlBarV75 = ta.valuewhen(not na(extPivotLow), bar_index - 3, 0)
+extPlPrevBarV75 = ta.valuewhen(not na(extPivotLow), bar_index - 3, 1)
+var line[] eqLinesV75 = array.new_line()
+var label[] eqLabelsV75 = array.new_label()
+eqhNewV75 = externalEQH and not externalEQH[1]
+eqlNewV75 = externalEQL and not externalEQL[1]
+if showEqV75 and eqhNewV75 and not na(extPhPrevBarV75)
+    eqhYV75 = (lastExtPH + prevExtPH) * 0.5
+    f_pushLineV75(eqLinesV75, line.new(extPhPrevBarV75, eqhYV75, extPhBarV75, eqhYV75, xloc=xloc.bar_index, color=color.new(color.red, 30), width=1, style=line.style_dotted), 4)
+    f_pushLabelV75(eqLabelsV75, label.new(extPhBarV75, eqhYV75, "EQH", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, color=color.new(color.red, 30), textcolor=color.white, size=size.tiny), 4)
+if showEqV75 and eqlNewV75 and not na(extPlPrevBarV75)
+    eqlYV75 = (lastExtPL + prevExtPL) * 0.5
+    f_pushLineV75(eqLinesV75, line.new(extPlPrevBarV75, eqlYV75, extPlBarV75, eqlYV75, xloc=xloc.bar_index, color=color.new(color.lime, 30), width=1, style=line.style_dotted), 4)
+    f_pushLabelV75(eqLabelsV75, label.new(extPlBarV75, eqlYV75, "EQL", xloc=xloc.bar_index, yloc=yloc.price, style=label.style_label_left, color=color.new(color.lime, 30), textcolor=color.black, size=size.tiny), 4)
+eqhPriceV75 = externalEQH ? math.max(lastExtPH, prevExtPH) : na
+eqlPriceV75 = externalEQL ? math.min(lastExtPL, prevExtPL) : na
+
+// ── SFP: la mecha barre el máximo/mínimo reciente y la vela cierra dentro.
+sfpUpV75 = (internalSweepUp or ictBslRaid) and close < open
+sfpDnV75 = (internalSweepDown or ictSslRaid) and close > open
+var int sfpBarV75 = na
+var float sfpPriceV75 = na
+var int sfpDirV75 = 0
+if sfpUpV75
+    sfpBarV75 := bar_index
+    sfpPriceV75 := high
+    sfpDirV75 := -1
+if sfpDnV75
+    sfpBarV75 := bar_index
+    sfpPriceV75 := low
+    sfpDirV75 := 1
+var label sfpTagV75 = na
+if barstate.islast
+    label.delete(sfpTagV75)
+    if showSfpV75 and not na(sfpBarV75) and bar_index - sfpBarV75 <= eventVisibleBarsV68 * 3
+        sfpTagV75 := label.new(sfpBarV75, sfpPriceV75, sfpDirV75 == -1 ? "SFP ▼" : "SFP ▲", xloc=xloc.bar_index, yloc=yloc.price, style=sfpDirV75 == -1 ? label.style_label_down : label.style_label_up, color=color.new(sfpDirV75 == -1 ? color.red : color.lime, 25), textcolor=sfpDirV75 == -1 ? color.white : color.black, size=size.tiny)
+
+// ── Premium / Equilibrium / Discount del rango operativo
+var line pdHiLineV75 = na
+var line pdMidLineV75 = na
+var line pdLoLineV75 = na
+var label pdHiTagV75 = na
+var label pdMidTagV75 = na
+var label pdLoTagV75 = na
+if barstate.islast
+    line.delete(pdHiLineV75)
+    line.delete(pdMidLineV75)
+    line.delete(pdLoLineV75)
+    label.delete(pdHiTagV75)
+    label.delete(pdMidTagV75)
+    label.delete(pdLoTagV75)
+    if showPdZonesV75
+        pdX1 = bar_index - 40
+        pdX2 = bar_index + boxBarsRight
+        pdHiLineV75 := line.new(pdX1, rangeHighV74, pdX2, rangeHighV74, xloc=xloc.bar_index, color=color.new(color.red, 45), width=1, style=line.style_solid)
+        pdMidLineV75 := line.new(pdX1, rangeMidV74, pdX2, rangeMidV74, xloc=xloc.bar_index, color=color.new(color.gray, 45), width=1, style=line.style_dashed)
+        pdLoLineV75 := line.new(pdX1, rangeLowV74, pdX2, rangeLowV74, xloc=xloc.bar_index, color=color.new(color.lime, 45), width=1, style=line.style_solid)
+        pdHiTagV75 := label.new(pdX2, rangeHighV74, "PREMIUM", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.red, 55), textcolor=color.white, size=size.tiny)
+        pdMidTagV75 := label.new(pdX2, rangeMidV74, "EQUILIBRIUM · " + rangeZoneTxtV74 + " " + str.tostring(math.round(rangePosV74 * 100)) + "%", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.gray, 55), textcolor=color.white, size=size.tiny)
+        pdLoTagV75 := label.new(pdX2, rangeLowV74, "DISCOUNT", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.lime, 55), textcolor=color.black, size=size.tiny)
+
+// ── Niveles MTF: semana y mes previos (2 solicitudes)
+[pwhV75, pwlV75] = request.security(syminfo.tickerid, "W", [high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
+[pmhV75, pmlV75] = request.security(syminfo.tickerid, "M", [high[1], low[1]], barmerge.gaps_off, barmerge.lookahead_off)
+var line pwhLineV75 = na
+var line pwlLineV75 = na
+var line pmhLineV75 = na
+var line pmlLineV75 = na
+var label pwhTagV75 = na
+var label pwlTagV75 = na
+var label pmhTagV75 = na
+var label pmlTagV75 = na
+if barstate.islast
+    line.delete(pwhLineV75)
+    line.delete(pwlLineV75)
+    line.delete(pmhLineV75)
+    line.delete(pmlLineV75)
+    label.delete(pwhTagV75)
+    label.delete(pwlTagV75)
+    label.delete(pmhTagV75)
+    label.delete(pmlTagV75)
+    if showMtfLevelsV75
+        mtfX1 = bar_index - 60
+        mtfX2 = bar_index + boxBarsRight + 10
+        if not na(pwhV75)
+            pwhLineV75 := line.new(mtfX1, pwhV75, mtfX2, pwhV75, xloc=xloc.bar_index, color=color.new(color.aqua, 35), width=1)
+            pwhTagV75 := label.new(mtfX2, pwhV75, "PWH", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.aqua, 60), textcolor=color.white, size=size.tiny)
+        if not na(pwlV75)
+            pwlLineV75 := line.new(mtfX1, pwlV75, mtfX2, pwlV75, xloc=xloc.bar_index, color=color.new(color.aqua, 35), width=1)
+            pwlTagV75 := label.new(mtfX2, pwlV75, "PWL", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.aqua, 60), textcolor=color.white, size=size.tiny)
+        if not na(pmhV75)
+            pmhLineV75 := line.new(mtfX1, pmhV75, mtfX2, pmhV75, xloc=xloc.bar_index, color=color.new(v63Gold, 35), width=1)
+            pmhTagV75 := label.new(mtfX2, pmhV75, "PMH", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(v63Gold, 60), textcolor=color.black, size=size.tiny)
+        if not na(pmlV75)
+            pmlLineV75 := line.new(mtfX1, pmlV75, mtfX2, pmlV75, xloc=xloc.bar_index, color=color.new(v63Gold, 35), width=1)
+            pmlTagV75 := label.new(mtfX2, pmlV75, "PML", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(v63Gold, 60), textcolor=color.black, size=size.tiny)
+
+// ── Killzones como fondo (sin objetos)
+ictInAsiaV75 = not na(time(timeframe = timeframe.period, session = ictAsiaV75, timezone = ictTz))
+bgcolor(showKillzoneBgV75 ? (ictInLondon ? color.new(color.purple, 92) : ictInNewYork ? color.new(color.blue, 92) : ictInAsiaV75 ? color.new(color.gray, 94) : na) : na)
+sessionTxtV75 = ictInLondon ? "LONDON KZ" : ictInNewYork ? "NEW YORK KZ" : ictInLondonClose ? "LONDON CLOSE" : ictInAsiaV75 ? "ASIA RANGE" : "FUERA DE SESIÓN"
+
+// ── Panel ESTRUCTURA & SETUP (abajo izquierda)
+swEventFreshV75 = not na(swLastEventBarV75) and bar_index - swLastEventBarV75 <= structEventBarsV75
+swEventQualityV75 = swEventFreshV75 ? (swLastEventRangeV75 >= atr * 1.10 ? "FUERTE" : "DÉBIL") : ""
+winRateV75 = statsWinV75 + statsLossV75 > 0 ? statsWinV75 * 100.0 / (statsWinV75 + statsLossV75) : 0.0
+
+var table structV75 = table.new(position.bottom_left, 2, 13, frame_color=color.new(v63Line, 15), frame_width=2, border_color=color.new(v63Line, 35), border_width=1)
+
+f_rowV75(_r, _l, _v, _c, _bg) =>
+    table.cell(structV75, 0, _r, _l, text_color=v63Gray, bgcolor=_bg, text_size=size.small, text_halign=text.align_left)
+    table.cell(structV75, 1, _r, _v, text_color=_c, bgcolor=_bg, text_size=size.small, text_halign=text.align_right)
+
+f_drawStructV75() =>
+    table.clear(structV75, 0, 0, 1, 12)
+    table.cell(structV75, 0, 0, "ESTRUCTURA & SETUP", text_color=v63Gold, bgcolor=v63Navy, text_size=size.small, width=12)
+    table.cell(structV75, 1, 0, syminfo.ticker + " | " + timeframe.period, text_color=v63Gray, bgcolor=v63Navy, text_size=size.small, width=15)
+    f_rowV75(1, "ESTRUCTURA SWING", swTrendV75 == 1 ? "ALCISTA" : swTrendV75 == -1 ? "BAJISTA" : "--", swTrendV75 == 1 ? v63Green : swTrendV75 == -1 ? v63Red : v63Gray, v63Navy2)
+    f_rowV75(2, "ESTRUCTURA INTERNA", inTrendV75 == 1 ? "ALCISTA" : inTrendV75 == -1 ? "BAJISTA" : "--", inTrendV75 == 1 ? v63Green : inTrendV75 == -1 ? v63Red : v63Gray, v63Navy)
+    f_rowV75(3, "ÚLTIMO EVENTO", swEventFreshV75 ? swLastEventTxtV75 + " · " + swEventQualityV75 : "sin evento reciente", swEventQualityV75 == "FUERTE" ? v63Green : swEventQualityV75 == "DÉBIL" ? v63Amber : v63Gray, v63Navy2)
+    f_rowV75(4, "GRADO SETUP", setupGradeV75, setupGradeV75 == "A" ? v63Green : setupGradeV75 == "B" ? v63Gold : setupGradeV75 == "C" ? v63Amber : v63Gray, v63Navy)
+    f_rowV75(5, "ZONA RANGO", rangeZoneTxtV74 + " " + str.tostring(math.round(rangePosV74 * 100)) + "%", discountV74 ? v63Green : premiumV74 ? v63Red : v63Gold, v63Navy2)
+    f_rowV75(6, "EQH / EQL", f_px(eqhPriceV75) + " / " + f_px(eqlPriceV75), color.white, v63Navy)
+    f_rowV75(7, "SESIÓN", sessionTxtV75, ictInKillzone ? v63Cyan : v63Gray, v63Navy2)
+    f_rowV75(8, "RATIO R (TP1)", planRrTxtV75, v63Gold, v63Navy)
+    f_rowV75(9, "TRADE ABIERTO", planLiveV75 ? (buyLiveV73 ? "COMPRA en curso" : "VENTA en curso") + " · TP " + str.tostring(liveTpCountV75) + "/5" : "sin posición", planLiveV75 ? v63Cyan : v63Gray, v63Navy2)
+    f_rowV75(10, "SEÑALES", str.tostring(statsTotalV75) + "  ·  ✓ " + str.tostring(statsWinV75) + "  ·  ✗ " + str.tostring(statsLossV75), color.white, v63Navy)
+    f_rowV75(11, "ACIERTO (TP1+)", str.tostring(winRateV75, "#.#") + "%", winRateV75 >= 55 ? v63Green : winRateV75 >= 45 ? v63Gold : v63Red, v63Navy2)
+    f_rowV75(12, "NOTA", "métricas en vivo, sin backtest", v63Gray, v63Navy)
+
+if showStatsPanelV75 and barstate.islast and not uiMobileV65
+    f_drawStructV75()
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V75 — ALERTAS TELEGRAM ALINEADAS CON LA MÁQUINA DE ESTADOS
+// BUY/SELL: apertura de posición (estado 31/32). PRE: estado 21/22 (rechazo en POI, sin gatillo).
+// Entry/SL/TP del mensaje = PLAN FINAL (los mismos valores que las líneas del gráfico).
+// Crear alerta en TradingView con: "Cualquier llamada a la función alert()".
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+f_clean(_s) => str.length(_s) > 0 ? _s : "-"
+f_jsonSafe(_s) => str.replace_all(str.replace_all(_s, "\\", "/"), "\"", "'")
+
+alertBuyV73 = enterBuyNowV73 and planValidV73
+alertSellV73 = enterSellNowV73 and planValidV73
+preAlertBuyV73 = stateCodeV73 == 21
+preAlertSellV73 = stateCodeV73 == 22
+alertTp1V75 = liveTradeDirV73 != 0 and liveTp1HitV75 and not liveTp1HitV75[1]
+alertStopV75 = stateCodeV73 == 65 or stateCodeV73 == 66
+alertTargetV75 = stateCodeV73 == 63 or stateCodeV73 == 64
+
+f_msgV73(_side) =>
+    string msg = "{"
+    msg += "\"source\":\"IMPULXOR_V75_POI_STRUCTURE_LIVE\","
+    msg += "\"ticker\":\"" + syminfo.ticker + "\","
+    msg += "\"symbol\":\"" + syminfo.tickerid + "\","
+    msg += "\"tf\":\"" + timeframe.period + "\","
+    msg += "\"signal\":\"" + _side + "\","
+    msg += "\"type\":\"" + _side + "\","
+    msg += "\"direction\":\"" + _side + "\","
+    msg += "\"side\":\"" + _side + "\","
+    msg += "\"action\":\"" + _side + "\","
+    msg += "\"order\":\"" + _side + "\","
+    msg += "\"order_type\":\"" + _side + "\","
+    msg += "\"orden\":\"" + _side + "\","
+    msg += "\"event\":\"ENTRY_" + _side + "\","
+    msg += "\"price\":\"" + f_px(planEntryLineV73) + "\","
+    msg += "\"precio\":\"" + f_px(planEntryLineV73) + "\","
+    msg += "\"entry\":\"" + f_px(planEntryLineV73) + "\","
+    msg += "\"entry_price\":\"" + f_px(planEntryLineV73) + "\","
+    msg += "\"sl\":\"" + f_px(planSlV73) + "\","
+    msg += "\"stoploss\":\"" + f_px(planSlV73) + "\","
+    msg += "\"stop_loss\":\"" + f_px(planSlV73) + "\","
+    msg += "\"tp1\":\"" + f_px(planTp1V73) + "\","
+    msg += "\"take_profit_1\":\"" + f_px(planTp1V73) + "\","
+    msg += "\"tp2\":\"" + f_px(planTp2V73) + "\","
+    msg += "\"take_profit_2\":\"" + f_px(planTp2V73) + "\","
+    msg += "\"tp3\":\"" + f_px(planTp3V73) + "\","
+    msg += "\"tp4\":\"" + f_px(planTp4V73) + "\","
+    msg += "\"tp5\":\"" + f_px(planTp5V73) + "\","
+    msg += "\"runner\":\"" + f_px(planTp5V73) + "\","
+    msg += "\"rr_tp1\":\"" + planRrTxtV75 + "\","
+    msg += "\"exec_score\":\"" + str.tostring(math.round(stateScoreV73)) + "\","
+    msg += "\"grade\":\"" + setupGradeV75 + "\","
+    msg += "\"score\":\"" + str.tostring(math.round(scoreShown)) + "\","
+    msg += "\"buy_score\":\"" + str.tostring(math.round(buyScore)) + "\","
+    msg += "\"sell_score\":\"" + str.tostring(math.round(sellScore)) + "\","
+    msg += "\"entry_zone\":\"" + f_jsonSafe(planEntryTxtV73) + "\","
+    msg += "\"plan_source\":\"" + planSourceTxtV73 + "\","
+    msg += "\"context\":\"" + macroContextTxtV73 + "\","
+    msg += "\"core\":\"" + operationTxt + "\","
+    msg += "\"state\":\"" + f_jsonSafe(stateTxtV73) + "\","
+    msg += "\"retro_zone\":\"" + f_jsonSafe(retroTxt) + "\","
+    msg += "\"accion\":\"" + f_jsonSafe(actionTxtV73) + "\","
+    msg += "\"fase\":\"" + f_jsonSafe(faseTxt) + "\","
+    msg += "\"wave\":\"" + f_jsonSafe(imxWavePhase) + "\","
+    msg += "\"poi\":\"" + f_jsonSafe(poiTxtV74) + "\","
+    msg += "\"poi_detail\":\"" + f_jsonSafe(poiTxt) + "\","
+    msg += "\"structure\":\"" + f_jsonSafe(structureTxtV73) + "\","
+    msg += "\"swing_structure\":\"" + (swTrendV75 == 1 ? "ALCISTA" : swTrendV75 == -1 ? "BAJISTA" : "--") + "\","
+    msg += "\"range_zone\":\"" + rangeZoneTxtV74 + "\","
+    msg += "\"session\":\"" + sessionTxtV75 + "\","
+    msg += "\"reversal\":\"" + f_jsonSafe(imxReversalTxt) + "\","
+    msg += "\"modo\":\"" + f_jsonSafe(modoTxt) + "\","
+    msg += "\"bias\":\"" + biasV48 + "\","
+    msg += "\"setup\":\"" + setupV48 + "\","
+    msg += "\"trigger\":\"" + triggerV48 + "\","
+    msg += "\"pending_order\":\"" + f_jsonSafe(pendingOrderTxt) + "\","
+    msg += "\"location_quality\":\"" + str.tostring(math.round(locationQuality)) + "\","
+    msg += "\"ict_structure\":\"" + f_jsonSafe(ictStructureTxt) + "\","
+    msg += "\"ict_liquidity\":\"" + f_jsonSafe(ictLiquidityTxt) + "\","
+    msg += "\"ict_ote\":\"" + f_jsonSafe(ictOteTxt) + "\","
+    msg += "\"ict_session\":\"" + ictSessionTxt + "\","
+    msg += "\"ict_buy_quality\":\"" + str.tostring(math.round(ictBuyQuality)) + "\","
+    msg += "\"ict_sell_quality\":\"" + str.tostring(math.round(ictSellQuality)) + "\","
+    msg += "\"ict_action\":\"" + f_jsonSafe(ictActionTxt) + "\","
+    msg += "\"prev_day_position\":\"" + f_jsonSafe(prevDayPosTxt) + "\","
+    msg += "\"prev_day_raid\":\"" + f_jsonSafe(prevDayRaidTxt) + "\","
+    msg += "\"fractal_bias\":\"" + fractalBiasTxt + "\","
+    msg += "\"fractal_action\":\"" + f_jsonSafe(fractalActionTxt) + "\","
+    msg += "\"fractal_buy_quality\":\"" + str.tostring(math.round(fractalBuyQuality)) + "\","
+    msg += "\"fractal_sell_quality\":\"" + str.tostring(math.round(fractalSellQuality)) + "\","
+    msg += "\"risk\":\"" + executionRisk + "\""
+    msg += "}"
+    msg
+
+f_preMsgV73(_side) =>
+    string msg = "{"
+    msg += "\"source\":\"IMPULXOR_V75_POI_STRUCTURE_LIVE\","
+    msg += "\"ticker\":\"" + syminfo.ticker + "\","
+    msg += "\"symbol\":\"" + syminfo.tickerid + "\","
+    msg += "\"tf\":\"" + timeframe.period + "\","
+    msg += "\"signal\":\"PRE_" + _side + "\","
+    msg += "\"event\":\"PRE_ALERT_" + _side + "\","
+    msg += "\"price\":\"" + str.tostring(close, format.mintick) + "\","
+    msg += "\"entry_zone\":\"" + f_jsonSafe(planEntryTxtV73) + "\","
+    msg += "\"sl\":\"" + f_px(planSlV73) + "\","
+    msg += "\"runner\":\"" + f_px(planTp5V73) + "\","
+    msg += "\"poi\":\"" + f_jsonSafe(poiTxtV74) + "\","
+    msg += "\"exec_score\":\"" + str.tostring(math.round(stateScoreV73)) + "\","
+    msg += "\"grade\":\"" + setupGradeV75 + "\","
+    msg += "\"score\":\"" + str.tostring(math.round(scoreShown)) + "\","
+    msg += "\"context\":\"" + macroContextTxtV73 + "\","
+    msg += "\"session\":\"" + sessionTxtV75 + "\","
+    msg += "\"fase\":\"" + f_jsonSafe(faseTxt) + "\","
+    msg += "\"risk\":\"" + executionRisk + "\","
+    msg += "\"accion\":\"PRE ALERTA: RECHAZO EN POI / ESPERAR IMPULSO-ESTRUCTURA\""
+    msg += "}"
+    msg
+
+if alertBuyV73 and not alertBuyV73[1]
+    alert(f_msgV73("BUY"), alert.freq_once_per_bar_close)
+if alertSellV73 and not alertSellV73[1]
+    alert(f_msgV73("SELL"), alert.freq_once_per_bar_close)
+if preAlertBuyV73 and not preAlertBuyV73[1]
+    alert(f_preMsgV73("BUY"), alert.freq_once_per_bar_close)
+if preAlertSellV73 and not preAlertSellV73[1]
+    alert(f_preMsgV73("SELL"), alert.freq_once_per_bar_close)
+
+anyAlertV73 = alertBuyV73 or alertSellV73 or preAlertBuyV73 or preAlertSellV73
+
+alertcondition(alertBuyV73, title="IMPULXOR V75 BUY VALIDADO", message="BUY IMPULXOR VALIDADO")
+alertcondition(alertSellV73, title="IMPULXOR V75 SELL VALIDADO", message="SELL IMPULXOR VALIDADO")
+alertcondition(preAlertBuyV73, title="IMPULXOR V75 PRE ALERTA BUY", message="PRE ALERTA BUY IMPULXOR: rechazo en POI, esperando impulso/estructura")
+alertcondition(preAlertSellV73, title="IMPULXOR V75 PRE ALERTA SELL", message="PRE ALERTA SELL IMPULXOR: rechazo en POI, esperando impulso/estructura")
+alertcondition(anyAlertV73, title="IMPULXOR V75 TODAS LAS ALERTAS", message="IMPULXOR V75 ALERTA BUY/SELL/PRE")
+alertcondition(alertTp1V75, title="IMPULXOR V75 TP1 ALCANZADO", message="IMPULXOR V75: TP1 alcanzado, SL protegido")
+alertcondition(alertStopV75, title="IMPULXOR V75 STOP TOCADO", message="IMPULXOR V75: stop tocado, esperar nuevo POI")
+alertcondition(alertTargetV75, title="IMPULXOR V75 OBJETIVO FINAL", message="IMPULXOR V75: objetivo final alcanzado")
+
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// V75 — CAPA VISUAL LIMPIA: caja central + FVG + liquidez + absorción + estructura
+//━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+var box centerBoxV71 = na
+var label centerTagV71 = na
+
+if barstate.islast
+    box.delete(centerBoxV71)
+    label.delete(centerTagV71)
+    if showCenterBoxV71
+        centerDirV73 = stateDirV73
+        centerLowV73 = centerDirV73 == 1 ? nz(stateZoneLowV73, buyExecLowV73) : centerDirV73 == -1 ? nz(stateZoneLowV73, sellExecLowV73) : math.min(ema9, ema21) - atr * 0.22
+        centerHighV73 = centerDirV73 == 1 ? nz(stateZoneHighV73, buyExecHighV73) : centerDirV73 == -1 ? nz(stateZoneHighV73, sellExecHighV73) : math.max(ema9, ema21) + atr * 0.22
+        centerColorV73 = stateCodeV73 == 31 ? color.lime :
+             stateCodeV73 == 32 ? color.red :
+             stateCodeV73 == 21 or stateCodeV73 == 22 ? color.yellow :
+             stateCodeV73 == 41 or stateCodeV73 == 51 ? color.lime :
+             stateCodeV73 == 42 or stateCodeV73 == 52 ? color.red :
+             stateCodeV73 == 61 or stateCodeV73 == 62 ? color.purple :
+             stateCodeV73 == 63 or stateCodeV73 == 64 ? color.aqua :
+             color.silver
+        centerDetailV73 = stateCodeV73 == 31 or stateCodeV73 == 32 ? "GATILLO ACTIVO · " + structureTxtV73 :
+             stateCodeV73 == 21 or stateCodeV73 == 22 ? "RECHAZO/ABSORCIÓN · " + earlyImpulseTxtV73 :
+             stateCodeV73 == 41 or stateCodeV73 == 42 ? continuationDirTxtV73 + " · " + liveTpTxtV75 :
+             stateCodeV73 == 51 or stateCodeV73 == 52 ? "RETROCESO SIN INVALIDACIÓN · " + liveTpTxtV75 :
+             actionTxtV73
+        centerBoxV71 := box.new(bar_index - 22, centerHighV73, bar_index + boxBarsRight, centerLowV73, xloc=xloc.bar_index, bgcolor=color.new(centerColorV73, 91), border_color=color.new(centerColorV73, 12), border_width=2)
+        centerTagV71 := label.new(bar_index + boxBarsRight, centerHighV73, "ZONA DE DECISIÓN\n" + stateTxtV73 + "\n" + centerDetailV73 + "\n" + poiTxtV74 + "\n" + stateZoneTxtV73, xloc=xloc.bar_index, style=label.style_label_left, color=color.new(centerColorV73, 8), textcolor=stateCodeV73 == 21 or stateCodeV73 == 22 or stateCodeV73 == 31 ? color.black : color.white, size=size.small)
+// FVG vivos: mismo rastreador que usa la lógica (V48), con mitigación real.
+var box bullFvgBoxV71 = na
+var box bearFvgBoxV71 = na
+var label bullFvgTagV71 = na
+var label bearFvgTagV71 = na
+
+if barstate.islast
+    box.delete(bullFvgBoxV71)
+    box.delete(bearFvgBoxV71)
+    label.delete(bullFvgTagV71)
+    label.delete(bearFvgTagV71)
+    if showFvgV71 and not na(bullFvgLow) and not na(bullFvgHigh)
+        bullLeftV71 = math.max(0, nz(bullFvgBar, bar_index) - 2)
+        bullFvgBoxV71 := box.new(bullLeftV71, bullFvgHigh, bar_index + boxBarsRight, bullFvgLow, xloc=xloc.bar_index, bgcolor=color.new(color.aqua, 90), border_color=color.new(color.aqua, 20), border_width=2)
+        bullFvgTagV71 := label.new(bar_index + boxBarsRight, bullFvgHigh, "IMBALANCE BUY / FVG\n" + f_range(bullFvgLow, bullFvgHigh), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.aqua, 15), textcolor=color.black, size=size.tiny)
+    if showFvgV71 and not na(bearFvgLow) and not na(bearFvgHigh)
+        bearLeftV71 = math.max(0, nz(bearFvgBar, bar_index) - 2)
+        bearFvgBoxV71 := box.new(bearLeftV71, bearFvgHigh, bar_index + boxBarsRight, bearFvgLow, xloc=xloc.bar_index, bgcolor=color.new(color.orange, 90), border_color=color.new(color.orange, 18), border_width=2)
+        bearFvgTagV71 := label.new(bar_index + boxBarsRight, bearFvgLow, "IMBALANCE SELL / FVG\n" + f_range(bearFvgLow, bearFvgHigh), xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.orange, 12), textcolor=color.black, size=size.tiny)
+
+// Liquidez SMC: BSL arriba / SSL abajo.
+var line bslLineV71 = na
+var line sslLineV71 = na
+var label bslTagV71 = na
+var label sslTagV71 = na
+
+if barstate.islast
+    line.delete(bslLineV71)
+    line.delete(sslLineV71)
+    label.delete(bslTagV71)
+    label.delete(sslTagV71)
+    if showLiquidityV71 and not na(ictBSL)
+        bslLineV71 := line.new(bar_index - 36, ictBSL, bar_index + boxBarsRight, ictBSL, xloc=xloc.bar_index, color=color.new(color.red, 18), width=2, style=line.style_dashed)
+        bslTagV71 := label.new(bar_index + boxBarsRight, ictBSL, "LIQUIDEZ SUPERIOR · BSL", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.red, 10), textcolor=color.white, size=size.tiny)
+    if showLiquidityV71 and not na(ictSSL)
+        sslLineV71 := line.new(bar_index - 36, ictSSL, bar_index + boxBarsRight, ictSSL, xloc=xloc.bar_index, color=color.new(color.lime, 18), width=2, style=line.style_dashed)
+        sslTagV71 := label.new(bar_index + boxBarsRight, ictSSL, "LIQUIDEZ INFERIOR · SSL", xloc=xloc.bar_index, style=label.style_label_left, color=color.new(color.lime, 8), textcolor=color.black, size=size.tiny)
+
+// Absorción: punto exacto + fuerza, solo último evento reciente.
+absBuyStrengthV71 = math.min(100.0, (absorbBuy ? 45.0 : 0.0) + (seqAbsorbBuy ? 15.0 : 0.0) + (sweepDown ? 15.0 : 0.0) + (buyPressure ? 10.0 : 0.0) + (supportStrength >= 70 ? 15.0 : 0.0))
+absSellStrengthV71 = math.min(100.0, (absorbSell ? 45.0 : 0.0) + (seqAbsorbSell ? 15.0 : 0.0) + (sweepUp ? 15.0 : 0.0) + (sellPressure ? 10.0 : 0.0) + (resistStrength >= 70 ? 15.0 : 0.0))
+
+var int lastAbsBarV71 = na
+var float lastAbsPriceV71 = na
+var float lastAbsStrengthV71 = na
+var int lastAbsDirV71 = 0
+if absBuyEventV68
+    lastAbsBarV71 := bar_index
+    lastAbsPriceV71 := low
+    lastAbsStrengthV71 := absBuyStrengthV71
+    lastAbsDirV71 := 1
+if absSellEventV68
+    lastAbsBarV71 := bar_index
+    lastAbsPriceV71 := high
+    lastAbsStrengthV71 := absSellStrengthV71
+    lastAbsDirV71 := -1
+
+var label absPointV71 = na
+if barstate.islast
+    label.delete(absPointV71)
+    if showAbsV71 and not na(lastAbsBarV71) and bar_index - lastAbsBarV71 <= 12
+        absPointV71 := label.new(lastAbsBarV71, lastAbsPriceV71, (lastAbsDirV71 == 1 ? "● ABS BUY " : "● ABS SELL ") + str.tostring(math.round(nz(lastAbsStrengthV71, 0))) + "%", xloc=xloc.bar_index, yloc=yloc.price, style=lastAbsDirV71 == 1 ? label.style_label_up : label.style_label_down, color=lastAbsDirV71 == 1 ? color.new(color.lime, 12) : color.new(color.red, 12), textcolor=lastAbsDirV71 == 1 ? color.black : color.white, size=size.tiny)
+
+// BOS / CHoCH / MSS: solo último evento estructural reciente.
+structBullEventV71 = (ictBullMSS or ictBullChoch or microBosBuy) and not (ictBullMSS[1] or ictBullChoch[1] or microBosBuy[1])
+structBearEventV71 = (ictBearMSS or ictBearChoch or microBosSell) and not (ictBearMSS[1] or ictBearChoch[1] or microBosSell[1])
+
+var int lastStructBarV71 = na
+var float lastStructPriceV71 = na
+var int lastStructDirV71 = 0
+var string lastStructTxtV71 = ""
+if structBullEventV71
+    lastStructBarV71 := bar_index
+    lastStructPriceV71 := high
+    lastStructDirV71 := 1
+    lastStructTxtV71 := ictBullMSS ? "MSS BUY" : ictBullChoch ? "CHoCH BUY" : "BOS BUY"
+if structBearEventV71
+    lastStructBarV71 := bar_index
+    lastStructPriceV71 := low
+    lastStructDirV71 := -1
+    lastStructTxtV71 := ictBearMSS ? "MSS SELL" : ictBearChoch ? "CHoCH SELL" : "BOS SELL"
+
+var label structTagV71 = na
+if barstate.islast
+    label.delete(structTagV71)
+    if showStructV71 and not na(lastStructBarV71) and bar_index - lastStructBarV71 <= 20
+        structTagV71 := label.new(lastStructBarV71, lastStructPriceV71, lastStructTxtV71, xloc=xloc.bar_index, yloc=yloc.price, style=lastStructDirV71 == 1 ? label.style_label_down : label.style_label_up, color=lastStructDirV71 == 1 ? color.new(color.lime, 18) : color.new(color.red, 18), textcolor=lastStructDirV71 == 1 ? color.black : color.white, size=size.tiny)
+
+// Velas de fuerza: solo color, sin cajas ni bandas.
+tradeBarBuyV71 = (realAccelBuy or explosivePressureBuy or ictBullDisplacement) and close > open
+tradeBarSellV71 = (realAccelSell or explosivePressureSell or ictBearDisplacement) and close < open
+barcolor(showTradeBarsV71 ? (tradeBarBuyV71 ? color.lime : tradeBarSellV71 ? color.red : na) : na)
+
