@@ -1,0 +1,286 @@
+# Auditoría IMPULXOR V77.1 — lógica y visual
+
+**Archivo auditado:** `IMPULXOR_V77_1_FINAL_CORREGIDO_LISTO_PINE.txt` (Pine Script v6, 3.299 líneas)
+**Método:** revisión estática línea a línea. No existe compilador Pine fuera de TradingView, así que no se ejecutó ni se compiló; los hallazgos se basan en la semántica documentada de Pine v6 y en el flujo del propio código. Las referencias `L1234` son números de línea del archivo.
+
+---
+
+## 1. Resumen ejecutivo
+
+El script está bien organizado en capas (motor → máquina de estados → plan único → capas visuales) y la idea de "una sola autoridad" para paneles, líneas y alertas se respeta en general. Sin embargo hay **cinco problemas de lógica que afectan directamente a lo que ve y opera el usuario**, y **un grupo de problemas visuales** que degradan la legibilidad del modo Dashboard (el modo por defecto).
+
+Prioridad máxima (corregir antes de seguir iterando la capa visual):
+
+| # | Hallazgo | Tipo | Severidad |
+|---|----------|------|-----------|
+| L1 | Los datos diarios (PDH/PDL, rango del día, fibs) y todos los votos MTF se piden con `lookahead_off` y sin desplazamiento `[1]`: en histórico van con un día/una vela HTF de retraso y en tiempo real no. Las señales y la estadística "HIST. TP1+" del histórico no reproducen lo que verá el trader en vivo. | Lógica | Alta |
+| L2 | Las "zonas" BUY y SELL heredadas se solapan siempre alrededor de la EMA21 y entre las dos cubren todo el rango de 72 velas. `inBuyZone`/`inSellZone` casi nunca discriminan. | Lógica | Alta |
+| L3 | TP1 se mide desde el techo/suelo de la zona, no desde el precio de entrada. Puede quedar a 0,05 ATR de la entrada, marcar "TP1 ✓", mover el SL a entrada y contar como acierto. Infla la tasa "ACIERTO (TP1+)". | Lógica | Alta |
+| L4 | El historial por zona (novedad V77.1) se reinicia cada vela porque `liveDemandBirthV68` se sobrescribe con `bar_index` mientras la calidad ≥ 60. El texto "HISTORIAL x/y LLEGÓ A OBJ.1" casi siempre dirá "AÚN SIN CASOS CERRADOS". | Lógica | Alta |
+| L5 | El lado mostrado en el panel derecho (`imgDirV76`) puede ser el del sesgo MTF mientras los precios de ENTRADA/OBJETIVO/STOP vienen del plan del CORE (`masterDir`). Puede mostrar "ENTRADA SELL" con un objetivo por encima de la entrada. | Lógica/Visual | Alta |
+| V1 | Las cajas de POI vivas se pintan con transparencia 6 (94 % opacas) encima de las velas: ocultan el precio dentro de la zona. | Visual | Alta |
+| V2 | En modo Dashboard (por defecto) no queda ningún marcador histórico de BUY/SELL en el gráfico: es imposible verificar visualmente el comportamiento pasado del escáner. 33 gates `not showImageDashboard` dejan ~20 inputs sin efecto. | Visual | Alta |
+| V3 | Tres cadenas de prioridad distintas para texto, subtítulo y color del semáforo: el texto puede decir "IMPULSO SELL" con color rojo de STOP y subtítulo "FUERA · ESPERAR NUEVO POI". | Visual | Media |
+
+---
+
+## 2. Hallazgos de lógica
+
+### L1. Datos HTF inconsistentes entre histórico y tiempo real (Alta)
+
+**Dónde:** `f_mtf` L172-185, H3 L188, diario L214, macro L361-362, semana/mes L2276-2277.
+
+Todas las peticiones usan `barmerge.lookahead_off` sin desplazar la serie. Con `lookahead_off`, en las velas históricas el valor HTF solo se actualiza cuando la vela HTF cierra; en la vela en tiempo real se recibe el valor de la vela HTF en formación. Consecuencias concretas:
+
+- `prevDayHigh = high[1]` en "D" (L214): en histórico, durante casi todo el día N el valor corresponde al día N‑2; en vivo, al día N‑1. PDH/PDL, `pdhRaid`, `pdlRaid`, OTE del día previo y `fractal*` cambian de significado entre histórico y vivo.
+- `dayHigh/dayLow` (L214-218): en histórico son el rango completo del día anterior; en vivo, el rango en formación de hoy. De ahí salen `fib31/fib50/fib68`, que definen `buyZoneFrom/To` y `sellZoneFrom/To`, que a su vez alimentan `inBuyZone`, `absorbBuy`, `buyNoFomo`, `nearSupport`, el POI de respaldo (`poiBuyLoV74` cuando no hay OB/FVG) y el SL. **Las entradas históricas y las entradas en vivo no usan la misma zona.**
+- `d5, d15, d60, d240, dD, d180`: en histórico reflejan la vela HTF previa cerrada; en vivo la vela en curso. Todo lo que dependa de ellos (`mtfBuy/Sell`, `masterDir`, `buyTrendAlive`, `marketBiasDirV75`, filtros de `candidateBuy`, `emergency*Reversal`) se comporta distinto.
+- Además, `request.security` a temporalidades **inferiores** a la del gráfico ("1", "5" desde H1 o D) devuelve la última vela intrabarra y su historial es limitado: las velas antiguas reciben `na` → `d1 = 0`, `r1 = na`, y los scores de las velas viejas no son comparables con los recientes. Pine recomienda `request.security_lower_tf` para eso.
+
+**Efecto neto:** el panel "SEÑALES · ✓ · ✗" y "HIST. TP1+" se calculan con datos que el trader nunca tuvo en tiempo real. No sirven ni como orientación aproximada.
+
+**Corrección propuesta:**
+
+```pine
+// Niveles estructurales del periodo previo: sin repintado y consistentes.
+[pdhV, pdlV] = request.security(syminfo.tickerid, "D", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+[pwhV, pwlV] = request.security(syminfo.tickerid, "W", [high[1], low[1]], lookahead = barmerge.lookahead_on)
+
+// Rango del día en curso calculado en el propio gráfico (igual en histórico y en vivo).
+var float dayHi = na
+var float dayLo = na
+if ta.change(time("D")) != 0
+    dayHi := high
+    dayLo := low
+else
+    dayHi := math.max(nz(dayHi, high), high)
+    dayLo := math.min(nz(dayLo, low), low)
+```
+
+Para los votos direccionales HTF hay que elegir explícitamente: (a) usar la vela HTF **cerrada** (`close[1]`, `ema[1]`, `rsi[1]` con `lookahead_on`), que es consistente pero retrasa una vela HTF; o (b) mantener el valor en formación y **marcar en el panel** que esos votos pueden cambiar hasta el cierre de la vela HTF. Lo que no es defendible es la mezcla actual.
+
+### L2. Zonas BUY/SELL degeneradas (Alta)
+
+**Dónde:** L230-241.
+
+```
+buyBaseHigh = max(lowerLiquidity + 0.45·ATR, ema21 + 0.35·ATR)
+sellBaseLow = min(upperLiquidity - 0.45·ATR, ema21 - 0.35·ATR)
+```
+
+La zona BUY siempre llega al menos hasta `ema21 + 0.35·ATR` y la SELL siempre baja al menos hasta `ema21 - 0.35·ATR`. Por tanto:
+
+- Ambas zonas comparten siempre la banda `ema21 ± 0.35·ATR`, que es justo donde se buscan retrocesos. `inBuyZone and inSellZone` es verdadero en la mayoría de los pullbacks.
+- La unión de ambas cubre desde `mínimo de 72 velas - 0.45·ATR` hasta `máximo de 72 velas + 0.45·ATR`: prácticamente cualquier precio está "en zona".
+- El +14 de `buyScore += inBuyZone` (L579) es casi gratuito; `absorbBuy`/`absorbSell` quedan gateados solo por mecha y cierre; y la zona de respaldo del POI (L1292-1295) puede tener varias ATR de altura, lo que a su vez aleja el SL (`f_slBuy(poiBuyLoV74)`) y ensancha la caja "ZONA DE COMPRA" del Dashboard.
+
+**Corrección:** definir la zona BUY como `[lowerLiquidity - k·ATR, lowerLiquidity + k·ATR]` y la banda EMA como una zona **distinta** (de retroceso), no fusionadas con `max/min`. Si se quiere conservar la fib diaria, que sea un tercer nivel, no una extensión del rango.
+
+### L3. TP1 medido desde la zona, no desde la entrada (Alta)
+
+**Dónde:** `f_tpBuy` L918-924, entrada L1499 (`liveEntryV73 := close`), bloqueo de persecución L1340.
+
+La entrada real es `close`, que puede estar hasta `poiBuyHiV74 + 0.55·ATR` (límite de `buyChaseBlockV74`). TP1 es como mínimo `poiBuyHiV74 + 0.60·ATR`. Distancia mínima entrada→TP1: **0,05 ATR**. Cuando `internalHigh` (máximo de 8 velas) está cerca del techo de la zona, TP1 queda a un tick de la entrada.
+
+Encadenado con la gestión (L1454-1460): al tocar TP1 se mueve el SL a entrada y, si luego salta el SL, la operación **cuenta como acierto** (`if liveTp1HitV75 → statsWinV75 += 1`, L1490). El resultado es una tasa "ACIERTO (TP1+)" inflada por operaciones de +0,05 ATR que cierran en breakeven.
+
+**Corrección:** calcular los objetivos desde la entrada efectiva y exigir un múltiplo mínimo del riesgo:
+
+```pine
+riskBuy = liveEntryV73 - buySlV73
+t1 := math.max(t1, liveEntryV73 + riskBuy * minR1)   // minR1 = 0.8–1.0
+```
+
+Y separar la estadística: "TP1+" (toque) de "cerró ≥ +0.5R" (rentabilidad), o al menos mostrar el R medio realizado.
+
+### L4. Historial por zona V77.1 se reinicia cada vela (Alta)
+
+**Dónde:** L1916-1921 y L1959-1964.
+
+`newDemandPoiV68 = poiBuyQualityV74 >= 60 and (OB o FVG válidos)` es verdadero vela tras vela mientras la zona siga viva. Cada vez se ejecuta `liveDemandBirthV68 := bar_index`. Luego en L1959: `if liveDemandBirthV68 != demandHistBirthV771 → contadores a 0`. Como el nacimiento cambia cada vela, los contadores `demandCasesV771/TpN` se ponen a cero **después** de haberse incrementado en la misma vela del cierre (el bloque de cierre está en L1486-1497, antes del reset).
+
+Efectos colaterales del mismo bug:
+- `demandInvalidV68` por edad (`bar_index - birth > poiMaxAgeBars`) nunca dispara mientras la calidad ≥ 60.
+- La caja del POI en Dashboard arranca siempre en `bar_index - 28` (L3220-3221) porque `birth - 2 > bar_index - 28`; nunca muestra el origen real de la zona.
+
+**Corrección:** fijar el nacimiento solo cuando la zona cambia realmente (misma tolerancia que ya usa `imgDemandChangedV767`):
+
+```pine
+demandMovedV68 = na(liveDemandLowV68) or math.abs(candidateDemandLowV68 - liveDemandLowV68) > atr * 0.10 or math.abs(candidateDemandHighV68 - liveDemandHighV68) > atr * 0.10
+if newDemandPoiV68
+    liveDemandLowV68 := candidateDemandLowV68
+    liveDemandHighV68 := candidateDemandHighV68
+    liveDemandStrengthV68 := poiBuyQualityV74
+    if demandMovedV68
+        liveDemandBirthV68 := bar_index
+```
+
+### L5. Lado del panel ≠ lado del plan (Alta)
+
+**Dónde:** `planDirV73` L1687 vs `imgDirV76` L2621.
+
+- `planDirV73 = stateDirV73 != 0 ? stateDirV73 : masterDir`
+- `imgDirV76 = … stateDirV73 != 0 ? stateDirV73 : marketBiasDirV75`
+
+Con `stateDirV73 == 0`, `masterDir == 1` y `marketBiasDirV75 == -1` (situación habitual en un retroceso profundo), el panel derecho y la vista móvil imprimen "ENTRADA SELL", "OBJETIVO SELL", "STOP SELL / INVALIDACIÓN" con los precios del plan BUY: el objetivo queda por encima de la entrada y el stop por debajo. El bloque de rutas (L2908) ya corrige esto con `imgRouteDirV771 = planValidV73 ? planDirV73 : imgDirV76`; hay que aplicar lo mismo a `imgSideTxtV76`, `imgZoneWordV76` y a las etiquetas ENTRADA/OBJETIVO/STOP del gráfico.
+
+### L6. Orden TP/SL dentro de la misma vela (Media)
+
+**Dónde:** L1454-1485.
+
+Los toques de TP se evalúan antes que el SL y sin conocer el orden intrabarra. Si una vela alcanza TP1 y el SL original, se marca TP1 ✓, el SL se mueve a entrada, se cierra por SL en entrada y **cuenta como acierto**. En velas de noticia (justo cuando importa) el sesgo es optimista. Regla conservadora: si en la misma vela `low <= SL` y `high >= TP1` y TP1 no estaba tocado en la vela anterior, resolver como pérdida (o usar `close` para decidir el orden probable).
+
+### L7. La estructura swing real no participa en el motor (Media)
+
+`swTrendV75`, `swBreakUpV75/DnV75` (pivotes de 10 velas, L2123-2180) solo se usan en paneles y en el JSON de alerta. El motor usa como "estructura" `ictBullMSS/Choch` (ruptura de un máximo de **5 velas**, L515-518) y `microBosBuy` (3 velas). Con `ictMssLookback = 5`, "MSS/CHoCH" se dispara en casi cualquier vela impulsiva, así que `buyStructureV73` (L1370) apenas filtra. El panel dice "ESTRUCTURA SWING: BAJISTA" mientras el motor autoriza un BUY por "CHoCH" de 5 velas. Conviene que `swTrendV75` pese en `buyStructureV73` o al menos en `buyLiveScoreV73`.
+
+### L8. Dos rastreadores de Order Block con vidas distintas (Media)
+
+- `bullObLow/High` vía `ta.valuewhen` con caducidad `obMaxAgeBars = 150` y **sin invalidación por ruptura** (L495-506). Alimenta `bullBreaker`, `ictBullPdOB`, `imxPoiBuyQ` y el SL (`f_slBuy`, L905).
+- `bullObLoV74/HiV74` con caducidad `poiMaxAgeBars = 300` e invalidación al cerrar por debajo (L1261-1283). Alimenta el POI.
+
+Un OB roto sigue "fresco" 150 velas para el SL y para la calidad ICT. Unificar en el rastreador V74.
+
+### L9. Distancia al POI de un solo lado (Media-baja)
+
+`buyDistanceFromPoiAtrV74 = close > poiHi ? … : 0` (L1332). Si el precio está muy **por debajo** de la demanda (zona atravesada), la distancia es 0 → `buyLocationV73` verdadero → estado 11 "POI BUY ACTIVO" con el precio cayendo bajo la zona. Espejo para SELL. Medir la distancia fuera de la zona por ambos lados.
+
+### L10. `ictBSL` obsoleto bloquea compras de forma permanente (Media-baja)
+
+`ictBSL` (L462) toma el par EQH aunque el precio ya lo haya superado. Entonces `buyRoomAtrV74 < 0` → `buyChaseBlockV74` (L1340) y `buySpaceOkV73 = false` hasta que se forme un nuevo pivote superior (mínimo 3 velas tras un nuevo máximo). Además el texto "LIQUIDEZ x" del objetivo queda por debajo de la entrada. Filtrar: `ictBSL` solo si `ictBSL > close`.
+
+### L11. Filtros de riesgo decorativos (Media-baja)
+
+- `spikeRiskV73 = volExtremeV61` solo cambia textos (`eventTxtV73`, `executionRisk`). No bloquea `enterBuyRawV73`.
+- `eventBlockV61` solo afecta a `manageTxtV61`, que además no se usa.
+- `manualNewsTitleV63` y `manualNewsLevelV63` (L64-65) no se leen en ninguna parte: el input "Impacto noticia: ALTO" no hace nada.
+- Killzones: `ictSessionQuality` solo escala `ictBuyQuality`, que entra al score con ×0,10 → efecto máximo ≈ 4 puntos, aunque la cabecera destaca la sesión como si fuera determinante.
+
+### L12. Estados y alertas en la vela en formación (Media)
+
+Toda la máquina de estados se recalcula en cada tick de la vela viva. Las alertas esperan al cierre (`freq_once_per_bar_close`) y las variables `var` se revierten en cada tick, pero **el Dashboard muestra "ENTRAR BUY FUERTE" intrabarra** y puede volver a "ESPERAR" antes del cierre. Para un público novato es la peor combinación. Opciones: gatear los estados 31/32 mostrados con `barstate.isconfirmed`, o añadir "· CIERRE PENDIENTE" mientras `not barstate.isconfirmed` (el reloj "VELA mm:ss" ayuda pero no lo explica).
+
+Adicionales del mismo bloque:
+- Los estados de salida 63-66 duran **una sola vela** (`closeBuyV75` es un pulso). El aviso "SALIR · STOP" desaparece a la vela siguiente. Retenerlo N velas como ya se hace con `structEventBarsV75`.
+- Las pre-alertas 21/22 se disparan en cada flanco de subida del estado; alrededor de un POI el estado parpadea y genera ráfagas de PRE alertas. Añadir un enfriamiento por zona.
+- TP1/STOP/OBJETIVO solo existen como `alertcondition` (L2465-2467). No llegan por la alerta "Cualquier llamada a alert()" que recomienda el comentario de L2336.
+
+### L13. Métricas que se presentan como precisión (Media)
+
+- "ASERTIVIDAD ◉ 78 %" (`liveConfidenceV75`, L1735) fuera de 21/22/31/32 es `max(fuerza del sesgo MTF, calidad del POI)`: un score de confluencia, no una tasa de acierto. El nombre induce a error.
+- "RATIO R (TP1)" con TP1 a 0,6–1,2 ATR y SL a 0,8–2,5 ATR suele ser < 1. Correcto, pero la tarjeta lo muestra en dorado como si fuera positivo.
+- "X/7 LISTOS" es `round(score/100·7)`; no es un checklist y aparece dos veces (filas 3 y 12).
+- `marketBiasStrengthV75` divide entre 110 pero los pesos suman 100 (L200-204): nunca pasa del 91 %.
+- Presión viva: si ambos scores son 0, muestra "COMPRA 0 % / VENTA 100 %" (L2716-2718).
+
+### L14. Objetivos TP2-TP5 desproporcionados (Media)
+
+`t2 = max(t1 + 0.45·ATR, externalLiquidityAbove > t1 ? externalLiquidityAbove : …)` (L920). `externalLiquidityAbove` es el máximo de 36 velas H3 o 42 velas H4: en M5 puede estar a 10+ ATR. TP3-TP5 se apilan encima. La caja "BENEFICIO" (L1799), el rango OBJETIVO (TP1–TP2) y las rutas "INTRADÍA/SWING" heredan esa escala. Limitar el salto a liquidez externa a un máximo en ATR (p. ej. `min(externalLiquidityAbove, zoneHigh + 4·ATR)`).
+
+### L15. Código inerte en el flujo de decisión
+
+- L1383-1385: `enterBuyRawV73 and enterSellRawV73` no puede ocurrir (`close > low + 0.52·rng` y `close < high - 0.52·rng` son excluyentes). Inofensivo, pero da falsa sensación de desempate.
+- L1170 `runnerNow`, L1169 `preNow`, L1152 `preventNow`, L1167 `noSpaceWait`: calculados y no consumidos por estado ni panel.
+
+---
+
+## 3. Hallazgos visuales
+
+### V1. Cajas POI casi opacas sobre las velas (Alta)
+
+L3223 y L3231: `bgcolor = color.new(pointBuyCssV75, 6)` → 94 % de opacidad, desde `bar_index - 28` hasta `bar_index + 21`, con altura mínima forzada de 0,84 ATR (L3172-3180). Ocultan las velas dentro de la zona, que es exactamente donde el usuario tiene que leer el rechazo. Además llevan cuatro líneas de texto blanco pequeño sobre verde brillante (contraste ≈ 1,6:1). Y como el respaldo `imgBuyReactionV768` (L3159) siempre existe, **siempre hay una caja BUY y una SELL** aunque no haya POI; con el problema L2, esas cajas pueden cubrir casi todo el rango visible.
+
+Corrección: transparencia 82-88, borde sólido, texto fuera de la caja (ya existe la etiqueta lateral) y no dibujar caja de respaldo cuando no hay OB/FVG/zona almacenada (o dibujarla como línea punteada).
+
+### V2. El Dashboard anula el resto de la capa visual (Alta)
+
+Con `showImageDashboard = true` (por defecto), 33 gates `not showImageDashboard` apagan: POINTS, POI V68, S/R fuertes, FVG, BSL/SSL, BOS/CHoCH, absorción, estructura swing e interna, EQH/EQL, SFP, Premium/Discount, PWH/PWL/PMH/PML, fondo de killzones, panel ESTRUCTURA & SETUP, caja central, cajas R/B, PDH/PDL y las etiquetas "ENTRAR BUY/SELL" (`plotshape` L1745-1746 y L3298-3299 con `false and …`). Unos 20 inputs no hacen nada en la configuración por defecto y el usuario no recibe aviso.
+
+Consecuencia operativa: **no queda rastro histórico de las entradas** en el gráfico. La "POLÍTICA VISUAL VIVA" (comentario L3133) elimina la única forma de auditar el escáner sobre velas pasadas. Recomendación: mantener siempre las etiquetas de entrada históricas (son `plotshape`, no cuestan objetos) y agrupar los inputs en "Dashboard" vs "Modo clásico" con un tooltip que diga en cuál aplican.
+
+### V3. Semáforo con tres cadenas de prioridad distintas (Media)
+
+- `f_calc_imgSemTxtV76` (L2650): … PREPARAR → **IMPULSO** → OBJETIVO → STOP → …
+- `f_calc_imgSemSubV76` (L2663): … PREPARAR → OBJETIVO → STOP → GONE → …
+- `imgSemColV76` (L2680): … PREPARAR → OBJETIVO → STOP → ámbar.
+- `imgSemLightTxtV76` (L2681): sin IMPULSO ni STOP.
+
+Ejemplo real: vela de stop con momentum bajista → texto "⚡ IMPULSO SELL", color rojo de STOP, subtítulo "FUERA · ESPERAR NUEVO POI", luz "● ESPERAR". Además "IMPULSO BUY" no comprueba `imgDirV76`, así que puede convivir con "ENTRADA SELL" en la fila de abajo. Derivar todo de un único `imgSemStateV76` (enum) y de él sacar texto, sub, color y luz.
+
+### V4. Colisiones y apilamiento de etiquetas a la derecha del precio (Media)
+
+En `f_imgDrawObjectsV76` (L3238-3293):
+- "OBJETIVO BUY" (`label_lower_left` en `imgObjHiV76 = TP2`, x = `bar_index + 14`) y la etiqueta "TP2 □ · precio" (`label_left`, mismo y, misma x) se pisan. En SELL ocurre con TP1.
+- ENTRADA (x + 16), OBJETIVO (x + 14), rango OBJETIVO (x + 14), STOP (x + 14), TP1-TP5 (x + 14) y las etiquetas POI (x + 20) se concentran en la misma columna. TP3/TP4/TP5 distan 0,65 ATR: en cuanto la escala vertical se comprime se superponen.
+- Todo se dibuja entre `bar_index + 1` y `+ 21`. Con el margen derecho por defecto de TradingView (≈ 5-10 velas) queda **debajo de la tabla `imgRightV76`**, que es opaca (`imgBgV76` con alfa 0). El usuario tiene que ampliar el margen derecho manualmente para ver el plan.
+
+Recomendación: escalonar x (TP en +6, OBJETIVO en +10, POI en +14), una sola etiqueta compacta para TP3-TP5 cuando estén a menos de N píxeles, y que el bloque del plan no exceda `bar_index + 8`.
+
+### V5. Tablas que crecen con el texto (Media)
+
+Las celdas Pine no hacen salto de línea automático. `imgRightV76` fila 3 en `size.large` concatena `imgSemTxtV76 + "\n" + imgSemSubV76 + " · " + imgChecklistTxtV77` ("GATILLO ACTIVO · OPERACIÓN HABILITADA · 5/7 LISTOS"), y las filas 17-19 imprimen "SCALPING · BUY · 4,280.5 – 4,295.0 · SCORE 63 % · ESPERAR" en una fila fusionada. El ancho del panel lo decide la cadena más larga: en un portátil el panel derecho puede ocupar un tercio del gráfico. En la vista móvil la fila 3 (`imgSemTxtV76 + " · " + imgSemSubV76`) tiene el mismo problema sin `\n`. Acortar cadenas, partir con `\n`, bajar a `size.normal`.
+
+### V6. Solapamiento de paneles (Media)
+
+`imgRightV76` (20 filas, `middle_right`) + `imgBottomV76` (5 filas, `bottom_center`, columna final `width=15`) + `imgHeadV76` (`top_center`) + `imgStructV76` (`top_left`, con una fila espaciadora de `height=10`) + marca de agua `middle_center`. En panes de menos de ~750 px de alto, el panel derecho (≈ 550 px) invade la banda inferior. La opción "TABLET" de `uiDeviceV65` no tiene ninguna rama: es idéntica a ESCRITORIO.
+
+### V7. Contraste (Media-baja)
+
+- Semáforo en estado ENTRAR/SEGUIR: texto blanco sobre `imgGreenV76` al 10 % de transparencia (blanco sobre #00E676 ≈ 1,6:1). Los botones usan tinta oscura sobre el mismo verde y sí se leen. Unificar: tinta oscura sobre verde/dorado/cian, blanco solo sobre rojo/azul/navy.
+- Etiqueta POI BUY (L3225) texto oscuro sobre verde: bien. Caja POI: texto blanco sobre verde: mal (ver V1).
+- `barcolor` lima/rojo (L2574) sobre velas ya verdes/rojas apenas se distingue; usar un color fuera de la paleta de velas (ámbar/cian) o marcar con `plotchar`.
+
+### V8. Textos que no cuadran con su etiqueta
+
+- Fila 11 "IMPULSO ACTUAL" → contenido es fase + secuencia; el impulso real solo se dibuja como etiqueta en el gráfico.
+- Fila 15 "SESGO" → contenido "HIST. TP1+ … CASOS".
+- Cabecera: "LONDRES ACTIVA · ESPERAR GATILLO" se muestra también cuando el semáforo dice "ENTRAR".
+- Chips de temporalidad: M1 M5 M15 M30 H1 H4 **IMPULXOR** D1. D1 separado del resto.
+- Fila espaciadora de `imgStructV76` (L2892): la celda es transparente pero el fondo de la tabla es opaco → aparece un bloque navy vacío del 10 % de la altura.
+
+### V9. Reloj de vela (Baja)
+
+`imgSecsLeftV77` usa `timenow`, que solo se reevalúa cuando llega un tick. En símbolos poco líquidos o fuera de mercado el reloj se congela (o muestra "VELA 00:00" en ámbar permanente durante el fin de semana). Indicar "sin ticks" cuando `timenow > time_close`.
+
+### V10. Textos de versión desalineados (Baja)
+
+Cabecera de comentarios "IMPULXOR V76", `source` del JSON "IMPULXOR_V75_…", títulos de `alertcondition` "V75", panel "SCANNER IA". El usuario final ve tres versiones distintas.
+
+---
+
+## 4. Código muerto e inputs sin efecto
+
+**Bloques desactivados a mano:**
+- L3130 `if false and showImageDashboard → f_imgZonesUpdateV76()`: toda la capa "POI LIVE-ONLY" (L3051-3129) y sus arrays nunca se ejecutan. `imgMaxZonesV76`, `imgZonePadV76` e `imgZoneHistoryV76` (inputs del grupo 09) no hacen nada.
+- L3298-3299 `plotshape(false and …)`.
+- L2112 `showImageDashboard ? "▲ BUY " : "POINT BUY "` dentro de un bloque que exige `not showImageDashboard`.
+- L2146 y L2154 repiten `not showImageDashboard` dos veces en la misma condición.
+
+**Identificadores definidos y nunca leídos (44):** `manualNewsTitleV63`, `manualNewsLevelV63`, `imgZoneHistoryV76`, `r45`, `r120`, `marketBiasSideV75`, `deltaSynthetic`, `volTxtV61`, `manageTxtV61`, `v65Purple`, `uiDesktopV65`, `zoneProxPctV65`, `reactionTxtV65`, `reactionColorV65`, `continuationReal`, `entryBuyFrom/To`, `entrySellFrom/To`, `eventTxtV73`, `execEnterBuyV72`, `execEnterSellV72`, `execArmedBuyV72`, `execArmedSellV72`, `execDirV72`, `macroContextDirV72`, `buyLocationV72`, `sellLocationV72`, `stateSlTxtV73`, `stateTargetTxtV73`, `uxEstado`, `uxFase`, `uxSpaceTxt`, `uxColorV75`, `imgZoneWordV76`, `imgOperationEnabledV766`, `imgPullbackTxtV767`, `imgExhaustDirV77`, `imgSeqDirV771`, `imgPhaseColV77`, `imgBuyAssertV768`, `imgSellAssertV768`, `imgBuyFvgPctV771`, `imgSellFvgPctV771`. También las funciones `stars`, `starsNum`, `tfDirTxt`, `f_barV63`, `f_tfBgV63`.
+
+Eliminarlos reduce el riesgo de tocar el límite de tamaño del script y aclara qué alimenta de verdad la decisión.
+
+---
+
+## 5. Lo que está bien
+
+- Un solo plan (`plan*V73`) alimenta líneas, paneles, posición viva y JSON de alerta: no hay divergencias entre lo dibujado y lo enviado.
+- Redibujado en la última vela con arrays comunes y limpieza previa (`f_lgClearV76`): sin fugas de objetos; los topes de `max_*_count` no se alcanzan.
+- Reversa del CORE con ventana de confirmaciones y vuelta a NEUTRO (`neutralReset`): resuelve el "masterDir pegado" de versiones anteriores.
+- FVG con mitigación real y caducidad; OB V74 con invalidación por cierre.
+- Helpers `f_px/f_range` evitan "NaN" en textos; `f_jsonSafe` en las cadenas libres del JSON.
+- 15 llamadas `request.security` (bajo el límite de 40) y ninguna dentro de bloques condicionales.
+
+---
+
+## 6. Plan de corrección sugerido (V77.2)
+
+1. **Datos HTF** (L1): niveles previos con `[1] + lookahead_on`; rango del día calculado en el gráfico; decidir y documentar el modo de los votos MTF.
+2. **Zonas** (L2): separar zona de liquidez y banda EMA; POI de respaldo acotado en ATR.
+3. **Objetivos y estadística** (L3, L6, L14): TP1 desde la entrada con R mínimo; resolución conservadora TP/SL en la misma vela; tope al salto de TP2; estadística de R realizado además de "TP1+".
+4. **Historial por zona** (L4): nacimiento solo al cambiar la zona.
+5. **Coherencia de lado y semáforo** (L5, V3): `imgSideTxtV76` desde `planDirV73`; un único estado visual del que salgan texto, sub, color y luz.
+6. **Capa visual** (V1, V2, V4-V7): cajas POI al 82-88 %; etiquetas históricas de entrada siempre visibles; escalonar etiquetas; acortar cadenas; contraste tinta/verde; inputs agrupados por modo.
+7. **Limpieza** (sección 4): borrar bloques `false and`, identificadores sin uso y unificar los textos de versión.
+
+Tras aplicar 1-4 conviene volver a mirar la tasa "HIST. TP1+": es esperable que baje de forma notable, y esa será la cifra honesta.
