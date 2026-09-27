@@ -1569,7 +1569,7 @@ if closeBuyV75 or closeSellV75
     // V77.2 — captura del cierre para el HISTORIAL VIVO (antes de resetear la posición).
     lastClosedDirV772 := liveTradeDirV73
     lastClosedTpV772 := (liveTp1HitV75 ? 1 : 0) + (liveTp2HitV75 ? 1 : 0) + (liveTp3HitV75 ? 1 : 0) + (liveTp4HitV75 ? 1 : 0) + (liveTp5HitV75 ? 1 : 0)
-    lastClosedResultV772 := buySlHitV75 or sellSlHitV75 ? (liveSlProtectedV75 ? "STOP PROTEGIDO" : "STOP") : buyTargetDoneV75 or sellTargetDoneV75 ? "OBJETIVO FINAL" : buyTimeOutV75 or sellTimeOutV75 ? "TIEMPO" : "ENTRADA CONTRARIA"
+    lastClosedResultV772 := buySlHitV75 or sellSlHitV75 ? (not na(liveSlOrigV75) and liveSlV73 != liveSlOrigV75 ? "STOP PROTEGIDO" : "STOP") : buyTargetDoneV75 or sellTargetDoneV75 ? "OBJETIVO FINAL" : buyTimeOutV75 or sellTimeOutV75 ? "TIEMPO" : "ENTRADA CONTRARIA"
     lastClosedChecklistV772 := (liveTp1HitV75 ? "1✓ " : "1□ ") + (liveTp2HitV75 ? "2✓ " : "2□ ") + (liveTp3HitV75 ? "3✓ " : "3□ ") + (liveTp4HitV75 ? "4✓ " : "4□ ") + (liveTp5HitV75 ? "5✓" : "5□")
 
     // Resultado atribuible al setup/zona direccional que originó esta operación.
