@@ -75,3 +75,28 @@ Limpiar esto reduce el riesgo de "script too large" y el tiempo de cálculo en M
 4. Re-etiquetar o endurecer la métrica TP1+ (2) y `mtfTotalWeightV75 = 100` (10).
 5. Unificar rastreador de OB (7) y recortar el payload (6).
 6. Limpieza de código muerto.
+
+---
+
+# Cambios aplicados en `IMPULXOR_V77.6.pine`
+
+Archivo nuevo; `IMPULXOR_V77.5.pine` se conserva intacto como referencia.
+
+| # | Hallazgo | Cambio |
+|---|----------|--------|
+| 1 | H3 repintaba | Request "180" con `close[1]`, EMAs`[1]`, RSI`[1]` y `lookahead_on`, igual que `f_mtf`. |
+| 2 | TP1 demasiado cercano | Nuevo input `TP1 mínimo en R` (por defecto 1.0). `f_minRrBuy/Sell` elevan TP1 a ≥ entrada ± R·riesgo y reescalonan TP2–TP5. Se aplica al plan POI y a la posición viva. Etiquetas "ACIERTO (TP1+)" → "TOCÓ TP1". |
+| 3 | TP1/STOP/OBJETIVO sin webhook | Nuevas llamadas `alert()` con `f_eventMsgV776` (`event`: `TP1`, `STOP`, `TARGET`; `signal`: `TP1_BUY`, `STOP_SELL`, etc.). |
+| 4 | "ENTRAR YA" tardío | Ventana por defecto 1 vela y el semáforo muestra "REGISTRADA A <precio>". |
+| 5 | Volatilidad no bloqueaba | Input `Bloquear entradas con volatilidad extrema` (on). Bloquea PREPARAR y ENTRAR; nuevo estado 1 "NO TRADEAR · VOLATILIDAD EXTREMA". |
+| 6 | Payload de ~3.000 chars | `f_msgV73` reducido a ~30 claves (~1.100 chars). Se añade `version`. `source` se mantiene por compatibilidad. |
+| 7 | Dos rastreadores de OB | El OB de SL/ICT ahora se invalida por cierre bajo/sobre el OB y ambos caducan con `obMaxAgeBars`. |
+| 10 | Peso MTF 110 | `mtfTotalWeightV75 = 100`. |
+| 11 | Volumen `na` | `volBase20 = sma(nz(volume,1),20)`. |
+| 13 | Versiones | Título y `alertcondition` en V77.6. |
+| 14 | Rótulos engañosos | "ASERTIVIDAD" → "SCORE VIVO"; "x/7 LISTOS" → "SCORE nn%". |
+| — | Código muerto | Eliminados 3 inputs, 7 funciones, el bloque `if false`, los `plotshape(false…)`, los `while` legacy y ~140 variables sin lectores (incluidos los textos ICT/fractal/onda que solo alimentaban el payload largo). 3.369 → ~3.090 líneas. |
+
+No aplicado (decisión de diseño, documentado): el bloqueo de persecución hacia BSL/SSL (hallazgo 9), el rastreador FVG de un solo gap (8) y el marco M1 (12).
+
+Compilación: no verificada fuera de TradingView. Si el editor marca algo, pásame la línea exacta.
