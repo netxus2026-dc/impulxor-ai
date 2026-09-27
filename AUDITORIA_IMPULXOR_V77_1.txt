@@ -284,3 +284,37 @@ Eliminarlos reduce el riesgo de tocar el límite de tamaño del script y aclara 
 7. **Limpieza** (sección 4): borrar bloques `false and`, identificadores sin uso y unificar los textos de versión.
 
 Tras aplicar 1-4 conviene volver a mirar la tasa "HIST. TP1+": es esperable que baje de forma notable, y esa será la cifra honesta.
+
+---
+
+## 7. Directrices V77.2 (indicadas por el usuario) y estado de aplicación
+
+Archivo resultante: `IMPULXOR_V77_2_PINE.txt`. Principio rector: **todo lo visible está vivo**. Nada decorativo, estático ni muerto; paneles, avisos, zonas, semáforo, checklist y textos responden a la lectura actual y las etiquetas anteriores no se acumulan.
+
+| # | Directriz | Implementación en V77.2 |
+|---|-----------|-------------------------|
+| 1 | Una sola zona operativa principal. Prioridad: posición viva → plan vigente → mejor lectura. Sin diferencia suficiente, no se fuerza caja. | Capa `ZONA OPERATIVA ÚNICA`: `mainDirV772` con esa prioridad; ventaja mínima `zoneGapV772` (10 pts por confluencia de diferencia + diferencia de score vivo). Se eliminó la capa V76.8 de doble caja y la V76.3 muerta. |
+| 2 | POI claro y coherente: el texto y la caja señalan el mismo POI. | `imgDirV76` sigue a `planDirV73`; la caja en estado 71/72 apunta al POI del lado del mensaje. La zona contraria no se dibuja. |
+| 3 | Filtro no rígido: mínimo dos confluencias de las que ya calcula IMPULXOR. | `confBuyCountV772 / confSellCountV772` sobre FVG · OB · S/R · UBICACIÓN · LIQUIDEZ; input `minConfV772 = 2`. Aplica a la caja, a "mejor lectura" y a reentradas; no al gatillo. |
+| 4 | Zona informativa: dirección, confluencias, fuerza, reacción estimada, toques y rango. | Etiqueta de la caja con esas seis lecturas más el historial de la zona. Textos evitan prometer reacción. |
+| 5 | Verde y rojo visibles; información SELL hacia la izquierda. | Caja translúcida (84) con borde sólido; etiqueta SELL arriba‑izquierda y BUY abajo‑izquierda, ambas dentro de la caja, lejos de ENTRADA / TP / panel derecho. |
+| 6 | SCALPING / INTRADÍA / SWING vivos en el panel derecho, sin cambiar su ancho. | Filas 17‑19 conservadas; se encienden por lectura y ahora también por REENTRADA; SWING muestra la gestión de la madre. Se añadieron filas 20‑21 (posición madre · checklist TP / reentrada). |
+| 7 | Posición madre y reentradas. | `motherDirV772`, `reentryBuyV772 / SellV772` (POI a favor + confluencias + sin persecución + sin FOMO, fuera de la ventana ENTRAR YA) y `reentryHorizonTxtV772` = SCALPING o INTRADÍA según M15/H1. Solo presentación: el motor no abre segunda posición. |
+| 8 | Gestión del swing. | `motherMgmtTxtV772`: MANTENER POSICIÓN MADRE · MANTENER · PROTEGIDA · PROTEGER / VIGILAR. Un scalp contrario no cierra la madre (el motor sigue igual). |
+| 9 | Checklist TP1–TP5 `1□ 2□ 3□ 4□ 5□` → ✓. | `imgTpChecklistV772` en panel derecho, HISTORIAL VIVO y vista móvil; con posición cerrada muestra el checklist de la última operación. |
+| 10 | HISTORIAL VIVO abajo a la izquierda. | Tabla `imgHistV772` (9 filas): casos cerrados, TP1+ (con aviso de muestra corta), checklist, posición, gestión, último cierre, historial de la zona activa. Sin etiquetas antiguas en el gráfico. |
+| 11 | No presentarlo como IA que aprende sola. | Nota fija en el panel: "ESTADÍSTICA DEL HISTORIAL PROCESADO · SIN MEMORIA ENTRE SESIONES". |
+| 12 | Motor original protegido. | `enterBuyRawV73`, `enterSellRawV73`, `enterBuyNowV73`, `enterSellNowV73`, `closeBuyV75`, `closeSellV75`, SL/TP y gestión de la posición son byte a byte los de V77.1 (verificado por diff). |
+
+### Correcciones de la auditoría aplicadas en V77.2 (no tocan el motor)
+
+- L4 historial por zona: el nacimiento de la zona solo cambia cuando la zona se mueve (`demandMovedV68 / supplyMovedV68`). Con ello también vuelve a funcionar la caducidad por edad.
+- L5 lado coherente (`imgDirV76`).
+- V1 cajas translúcidas; V3 semáforo de un solo estado (`imgSemStateV772`); V4 etiquetas TP a +9 y OBJETIVO en una sola etiqueta; V7 tinta oscura sobre verde/dorado; V8 etiquetas de fila corregidas y sesión sin instrucción contradictoria.
+- L12 parcial: avisos STOP/OBJETIVO retenidos `exitHoldBarsV772` velas; "· CIERRE PENDIENTE" en ENTRAR/PREPARAR mientras la vela no cierra.
+- L13 parcial: presión 50/50 sin score; peso MTF 100.
+- Código muerto: bloque V76.3, `plotshape(false …)`, ternario muerto de POINTS, condición duplicada.
+
+### Pendiente a propósito (cambiaría entradas o cierres; requiere decisión del usuario)
+
+L1 datos HTF (`lookahead` / rango del día), L2 zonas solapadas, L3 TP1 desde la entrada, L6 orden TP/SL en la misma vela, L7 estructura swing en el motor, L8 unificar rastreadores de OB, L9 distancia al POI por ambos lados, L10 `ictBSL` obsoleto, L14 tope al salto de TP2. Todos alterarían el gatillo o los cierres que la directriz 12 protege. La estadística mostrada sigue heredando los sesgos de L1, L3 y L6 hasta que se decida abordarlos.
