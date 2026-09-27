@@ -1,0 +1,165 @@
+AUDITORÍA IMPULXOR V77.5 — LÓGICA Y VISUAL
+==========================================
+
+Archivo auditado: IMPULXOR_V77_5.txt (Pine v6, 3.332 líneas)
+Método: revisión estática y diff contra V77.1 y contra la V77.2 entregada antes. No hay compilador Pine fuera de
+TradingView, así que no se compiló. Las referencias Lnnnn son líneas del archivo V77.5.
+
+
+1. QUÉ ES V77.5 EN REALIDAD
+---------------------------
+
+V77.5 parte de V77.1, NO de V77.2. El diff contra V77.1 son 69 líneas (título + 3 bloques nuevos); contra V77.2 son 583.
+Consecuencia directa: ninguna corrección de V77.2 está en V77.5. Siguen presentes, sin cambios, todos los hallazgos de
+la auditoría anterior (L1–L14 y V2–V10), incluidos los cinco de severidad alta. Detalle en la sección 4.
+
+Lo que V77.5 añade sobre V77.1 (tres bloques):
+  a) L2907–2925  Posición madre, reentrada, "amenaza" y texto de gestión; rutas SCALPING/INTRADÍA/SWING reescritas.
+  b) L3046–3061  Panel HISTORIAL compacto en middle_left (6 filas, texto tiny) con checklist TP.
+  c) L3234–3266  "POI único visible": elige un lado (viva → plan → score) y exige 2 de 4 evidencias; cajas al 45 %.
+
+
+2. VEREDICTO
+------------
+
+V77.5 avanza en tres directrices (una sola caja, rutas vivas con posición madre, checklist TP) pero lo hace sobre un
+cimiento que ya estaba auditado como roto. Tres de sus novedades no funcionan como aparentan:
+
+  N1  "PROTEGER · REVERSA" no puede mostrarse nunca (código muerto por orden de evaluación).                 Alta
+  N2  Las filas "POI BUY x/y" y "POI SELL x/y" del historial leerán 0/0 casi siempre (bug L4 de V77.1).      Alta
+  N3  La posición madre es solo texto: el motor sigue cerrando la madre en cuanto aparece una entrada
+      contraria (closeBuyV75 incluye enterSellNowV73, L1499). La directriz 7 no se cumple; solo se etiqueta.  Alta
+  N4  Tres fuentes distintas de "lado": panel derecho (imgDirV76, L2621), rutas (imgRouteDirV771, L2909) y
+      caja (imgPoiDirV775, L3235). Puede haber caja POI BUY con panel "ENTRADA SELL".                        Alta
+
+Prioridad recomendada: aplicar el conjunto de parches V77.2 (o partir de V77.2) y trasladar encima las tres ideas
+buenas de V77.5. Seguir apilando capas sobre V77.1 reproduce los mismos defectos en cada versión.
+
+
+3. HALLAZGOS NUEVOS DE V77.5
+----------------------------
+
+N1. "PROTEGER · REVERSA" es inalcanzable (Alta)
+    L2921: imgThreatV775 = mother and (live == 1 ? enterSellRawV73 : enterBuyRawV73).
+    Se evalúa DESPUÉS del bloque de posición (L1499–1571). Cuando enterSellRawV73 pasa a true con un BUY vivo,
+    enterSellNowV73 (flanco) cierra el BUY y abre el SELL en esa misma vela; al llegar a L2921 liveTradeDirV73 ya
+    es -1 y la amenaza se comprueba contra enterBuyRawV73. Si enterSellRawV73 sigue true en velas siguientes ya
+    no es flanco, pero la madre ya es SELL. Resultado: el texto rojo "PROTEGER · REVERSA" y el color rojo de la
+    fila GESTIÓN (L3060) no aparecen en la práctica.
+    Corrección: definir amenaza con las piezas previas al gatillo (sellRejectV73, sellStructureV73,
+    sellLiveScoreV73 >= X) o con enterSellRawV73[1] latched, y decidir si la madre debe sobrevivir (ver N3).
+
+N2. Historial por POI vacío (Alta)
+    L3058–3059 imprimen demandTp1V771/demandCasesV771 y supplyTp1V771/supplyCasesV771. En V77.1/V77.5 esos contadores
+    se reinician cada vela porque liveDemandBirthV68 := bar_index se ejecuta mientras la calidad del POI sea >= 60
+    (L1921, L1927) y L1959 detecta "nueva zona" en cada cambio de nacimiento. El panel mostrará "0/0 · TP3 0"
+    salvo en ventanas en que la calidad caiga por debajo de 60. V77.2 lo corrigió con demandMovedV68/supplyMovedV68.
+
+N3. La posición madre no manda en el motor (Alta, decisión de diseño pendiente)
+    Directriz 7: "un retroceso pequeño no debe transformar el scanner en la dirección contraria". El texto
+    imgManageV775 lo dice, pero closeBuyV75 (L1499) sigue cerrando la madre con enterSellNowV73 y abriendo la
+    contraria. Además, si enterBuyNowV73 y enterSellNowV73 coinciden en la misma vela, el bloque L1540/L1556
+    abre BUY y lo sobrescribe con SELL, sumando 2 a statsTotalV75 (quirk heredado).
+    Directriz 12 protege ese cierre, así que hay que elegir: (a) mantener el motor y aceptar que "posición madre"
+    es solo presentación, diciéndolo en el panel; o (b) autorizar un cambio mínimo en closeBuyV75/closeSellV75
+    (por ejemplo, exigir score contrario >= minEntryStrong o SL tocado para cerrar la madre). No se puede cumplir
+    7 y 12 a la vez tal como está.
+
+N4. Tres "lados" distintos (Alta)
+    - Panel derecho y móvil: imgSideTxtV76 <- imgDirV76 (L2621) con fallback a marketBiasDirV75 (bug L5).
+    - Rutas: imgRouteDirV771 (L2909) <- viva → planDirV73 → imgDirV76.
+    - Caja: imgPoiDirV775 (L3235) <- viva → planDirV73 → score vivo ±5.
+    En estado neutro con masterDir ≠ sesgo MTF, la caja pinta POI BUY y el panel imprime ENTRADA/OBJETIVO/STOP
+    SELL con precios BUY. Una sola fuente de lado (planDirV73 cuando planValidV73) resuelve N4 y L5.
+
+N5. Reentrada sin filtros de persecución (Media)
+    L2918: imgReV775 = madre and retroceso and toque POI and rechazo. No exige not buyChaseBlockV74, buyNoFomo ni
+    confluencias mínimas (directriz 3). Puede marcar "REENTRADA LISTA" con buyRoomAtrV74 < 0.65 (sin espacio).
+    Tampoco sale de la ventana ENTRAR YA: puede decir "REENTRADA" en la vela siguiente a la entrada.
+
+N6. Caja sin zona en ENTRAR/PREPARAR (Media)
+    L3238: imgShowBuyV775 exige imgBuyEvV775 >= 2 o posición viva. En estados 31/32 (ENTRAR) o 21/22 (PREPARAR)
+    con 1 evidencia, el semáforo grita ENTRAR BUY y no hay caja. Directriz 2 pide que el POI del mensaje se vea.
+    Las evidencias son 4 (FVG, OB, fib, S/R>=65); faltan UBICACIÓN y LIQUIDEZ que pedía la directriz 3.
+
+N7. Contenido de la caja incompleto respecto a la directriz 4 (Media-baja)
+    imgBuyTxtV775 (L3240) muestra conf, fuerza, razones y lectura de toques. Se perdieron RANGO y el número de
+    TOQUES que V77.1 sí imprimía (imgBuyInsideV771), y no hay "reacción estimada".
+
+N8. Etiqueta "▲ POI BUY" pisa el texto de la caja (Media-baja)
+    L3259: label en (buyL768 + 2, imgBuyHiV768) con label_left; el texto de la caja va text_valign=top y
+    text_halign=left (L3258): misma esquina. En SELL (L3265–3266) idem en la esquina inferior izquierda.
+    La caja sigue llegando a bar_index + 21 (L3257): con el margen derecho por defecto queda bajo el panel.
+
+N9. Cajas al 45 % (Media-baja)
+    Mejor que el 6 % de V77.1, pero sigue siendo 55 % opaca con tres líneas de texto blanco pequeño sobre verde
+    brillante. 82–88 y texto oscuro sobre verde.
+
+N10. Panel HISTORIAL en middle_left (Baja)
+    La directriz 10 pedía abajo a la izquierda. middle_left compite verticalmente con el panel top_left (que tiene
+    una fila espaciadora del 10 %) y con la marca de agua central. No lleva la nota de la directriz 11 (no es IA
+    que aprende; sin memoria entre sesiones). El checklist vuelve a 1□…5□ al cerrar: no recuerda la última
+    operación.
+
+N11. "SIN REENTRADA" vs "ESPERAR POI" (Baja)
+    L2923: SCALPING dice "ESPERAR POI" cuando hay retroceso sin toque, "SIN REENTRADA" en caso contrario. En una
+    posición que avanza a favor (sin retroceso) el texto "SIN REENTRADA" suena negativo aunque sea lo normal.
+
+
+4. HALLAZGOS HEREDADOS DE V77.1 QUE SIGUEN EN V77.5 (sin cambios)
+-----------------------------------------------------------------
+
+Lógica (ver AUDITORIA_IMPULXOR_V77_1.txt para el detalle y las correcciones):
+  L1  Datos HTF con lookahead_off y sin [1]: PDH/PDL y rango del día distintos en histórico y en vivo.      Alta
+  L2  Zonas BUY/SELL solapadas en EMA21 ± 0,35 ATR; entre ambas cubren todo el rango.                     Alta
+  L3  TP1 medido desde la zona, no desde la entrada (puede quedar a 0,05 ATR).                             Alta
+  L4  Nacimiento de zona sobrescrito cada vela → historial por zona y caducidad rotos (ver N2).            Alta
+  L5  imgDirV76 con fallback al sesgo MTF (ver N4).                                                        Alta
+  L6  TP y SL en la misma vela: TP se evalúa antes → sesgo optimista.                                       Media
+  L7  Estructura swing (swTrendV75) no participa en el motor.                                              Media
+  L8  Dos rastreadores de OB con vidas distintas.                                                          Media
+  L9  Distancia al POI de un solo lado.                                                                    Media-baja
+  L10 ictBSL obsoleto bloquea compras.                                                                     Media-baja
+  L11 Filtros de riesgo/noticias decorativos; inputs manualNewsTitleV63/LevelV63 sin uso.                  Media-baja
+  L12 Estados ENTRAR intrabarra sin aviso; salidas 63–66 de una sola vela; PRE alertas sin enfriamiento.   Media
+  L13 "ASERTIVIDAD" es confluencia, no acierto; peso MTF 110 (L204); presión 0/100 sin score (L2717).       Media
+  L14 TP2–TP5 saltan a liquidez H3/H4.                                                                     Media
+
+Visual:
+  V2  33 gates not showImageDashboard: ~20 inputs sin efecto en el modo por defecto; sin marcadores históricos.
+  V3  Semáforo con tres cadenas de prioridad distintas (L2650–2681): texto, sub y color pueden contradecirse.
+  V4  "OBJETIVO" y "TP2" en la misma coordenada; etiquetas del plan bajo el panel derecho.
+  V5  Tablas que crecen con el texto (mejorado en rutas al quitar "SCORE xx%", pero la fila 3 sigue en large).
+  V6  Solapamiento de paneles en panes bajos; TABLET sin efecto.
+  V7  Blanco sobre verde en el semáforo.
+  V8  Etiquetas de fila "IMPULSO ACTUAL" / "SESGO" que no corresponden al contenido.
+  Código muerto: L3156 if false (bloque V76.3 completo), L3331–3332 plotshape(false …), 44 identificadores sin uso.
+
+
+5. CUMPLIMIENTO DE LAS 12 DIRECTRICES EN V77.5
+----------------------------------------------
+
+  0  Todo vivo, nada muerto            PARCIAL   Sigue el bloque V76.3 desactivado y los plotshape(false).
+  1  Una sola zona                     SÍ        imgPoiDirV775; sin ventaja (±5) no hay caja.
+  2  POI coherente con el mensaje      NO        Tres fuentes de lado (N4); caja ausente en ENTRAR/PREPARAR (N6).
+  3  Mínimo dos confluencias           PARCIAL   4 familias en vez de 5; no aplica a la reentrada.
+  4  Zona informativa                  PARCIAL   Sin rango, sin nº de toques, sin reacción estimada (N7).
+  5  Verde/rojo · info a la izquierda  PARCIAL   Info a la izquierda sí; 45 % opaca y colisión de etiqueta (N8, N9).
+  6  Rutas vivas                       SÍ        Rutas reescritas con posición madre; textos más cortos.
+  7  Posición madre y reentradas       NO        Solo texto; el motor sigue reversando (N3); reentrada sin filtros (N5).
+  8  Gestión del swing                 PARCIAL   Textos correctos; "PROTEGER · REVERSA" inalcanzable (N1).
+  9  Checklist TP                      SÍ        Fila TP del panel middle_left.
+ 10  Historial compacto                PARCIAL   Contadores por POI rotos (N2); middle_left en vez de abajo-izquierda.
+ 11  No "IA que aprende"               NO        Sin nota en el panel.
+ 12  Motor protegido                   SÍ        El diff no toca entradas, cierres, SL ni TP.
+
+
+6. RECOMENDACIÓN
+----------------
+
+1) Tomar V77.2 como base (ya contiene L4, L5, V1, V3, V4, V7, V8, semáforo único, HISTORIAL VIVO abajo-izquierda con
+   nota 11, checklist con memoria, reentrada con filtros de persecución/FOMO/confluencias, código muerto eliminado).
+2) Portar de V77.5 lo que suma: rutas con texto corto sin "SCORE xx%", la idea de "amenaza" pero definida antes del
+   gatillo (N1), y el panel compacto si se prefiere a la versión de 9 filas.
+3) Decidir N3: o la madre es solo presentación (y se dice), o se autoriza tocar closeBuyV75/closeSellV75.
+4) Después, abordar L1, L2, L3 y L6, que son los que deforman la estadística que ahora se muestra en dos paneles.
