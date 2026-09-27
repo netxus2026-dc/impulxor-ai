@@ -1,0 +1,193 @@
+AUDITORÍA IMPULXOR V77 "SCANNER IA FUSION FINAL · POI STRUCTURE LIVE" — LÓGICA Y VISUAL
+====================================================================================
+
+Origen: script pegado en el chat (no como archivo). Revisión estática de lectura completa. No se pudieron correr
+los chequeos automáticos de referencias adelantadas ni el conteo de tokens; para eso hace falta el .txt.
+Referencias: por nombre de bloque/identificador (no hay numeración de líneas fiable en un pegado).
+
+
+1. QUÉ ES ESTA VERSIÓN
+----------------------
+
+No desciende de V77.1, V77.2 ni V77.5. Es la rama V76 (motor V73/V74/V75 + dashboard "imagen") con tres añadidos:
+  a) Bloque "10. FUSION IA PRO": chop filter, fib 61.8–70.5 del rango de 24 velas, LSE sweep/aceptación,
+     oferta/demanda fuerte, anti-chase, Reaction/Confirmed entry y gate, SL dinámico vivo, tablero IA·LB·LS.
+  b) "V77 — ZONAS VIVAS NO-REPAINT": una caja BUY y una SELL vivas con checklist TOQUE/REAC/ESTR/ENTR por zona y
+     tabla de historial de las últimas 6 zonas alcanzadas (bottom_right).
+  c) Dashboard V76 rediseñado: cabecera con espaciadores, panel derecho en top_right (17 filas), banda inferior
+     en bottom_left, etiquetas del plan a la IZQUIERDA de la vela, POINTS y etiquetas BUY/SELL históricas activas.
+
+No contiene el historial por zona V77.1 (V771), ni las correcciones V77.2, ni las rutas/posición madre de V77.5.
+
+
+2. VEREDICTO
+------------
+
+Es la versión con mejor capa visual de las cuatro auditadas (semáforo con una sola cadena, etiquetas a la izquierda,
+cajas translúcidas, checklist por zona, marcadores históricos de entrada). Pero:
+
+  F1  El motor YA NO es el original: cambia buyLiveScoreV73, prepare*, enterBuyRawV73/enterSellRawV73 y añade un
+      SL dinámico que modifica liveSlV73. Contradice la directriz 12 y hace que la estadística no sea comparable
+      con ninguna versión anterior.                                                                        Alta
+  F2  El SL dinámico se aplica ANTES de evaluar el stop en la misma vela y usa el close de esa vela: un trailing
+      colocado en close − 0,7/1,25 ATR puede quedar por encima del low de la propia vela → "stop tocado" en una
+      vela que cerró a favor. Falsos stops en cada expansión.                                               Alta
+  F3  Con casi total seguridad supera el límite de 100.256 tokens compilados: V77.1 ya estaba al borde (V77.2
+      falló con +180 líneas) y aquí hay ~+260 líneas de código denso respecto a V77.1 sin ninguna poda.        Alta
+  F4  Directriz 1 incumplida: siguen dibujándose una caja BUY y una caja SELL a la vez (una por dirección),
+      ambas como "lead".                                                                                   Alta
+  F5  Fib 61.8–70.5 sin dirección de impulso: se mide sobre highest/lowest de 24 velas sin saber si el tramo
+      fue alcista o bajista. La "zona BUY 61.8–70.5" existe también tras una caída, suma +8 al score y habilita
+      confirmedBuyV77.                                                                                     Media-alta
+
+Directrices 6 (rutas), 7 (posición madre/reentrada), 8 (gestión del swing), 9 (checklist TP1–TP5) y 11 (nota
+"no es IA que aprende") no están implementadas. Detalle en la sección 6.
+
+
+3. HALLAZGOS DE LÓGICA (nuevos de esta versión)
+-----------------------------------------------
+
+F1. Motor modificado (Alta · decisión de diseño)
+    - buyLiveScoreV73: pesos 0,38/18/14/10/5 + fib 8 + sweep 6 + cont 6 + strong 8 − chop 18 − chase/hardPoi 24.
+    - prepareBuyV73 / enterBuyRawV73: añaden not chopFusion, not hardPoiBuyV77, fusionGateBuyV77, spaceBuyV77 y
+      la alternativa lseContBuyV77 en el requisito de estructura/momentum.
+    - fusionGateBuyV77 (por defecto activo) exige reactionBuyV77 o confirmedBuyV77. Con poiQ = 58 (mínimo para
+      entrar) reactionQuality = 27,8 + rechazo 20 = 47,8 < 58: la entrada necesita además sweep (+12), fib (+10)
+      o demanda fuerte (+8). Las entradas serán bastante menos frecuentes que en V77.x. No es un error, pero hay
+      que asumirlo: el motor es otro y "SEÑALES/ACIERTO" no admite comparación con versiones previas.
+    - spaceBuyV77 (≥ 0,75 ATR a ictBSL) se suma a buySpaceOkV73 (≥ 0,28) y a buyRoomAtrV74 < 0,65: tres umbrales
+      para lo mismo. Y hereda L10 (ictBSL obsoleto por debajo del precio → bloqueo permanente).
+
+F2. SL dinámico evaluado en la misma vela (Alta)
+    Orden actual: gestión TP → SL dinámico (usa close) → buySlHitV75 = low <= liveSlV73.
+    Ejemplo BUY: progR ≥ 1,8 → liveSlV73 := max(SL, close − 1,25·ATR). Si la vela tiene rango 1,6 ATR y cierra en
+    máximos, low = close − 1,6·ATR < nuevo SL → buySlHitV75 = true en una vela de continuación fuerte. Con el
+    trailing "apretado" (0,70 ATR desde 3,2R) ocurre con velas normales. Además el trade se cierra "al SL" a un
+    precio que nunca se negoció como stop.
+    Corrección: calcular el trailing con la vela anterior (close[1]) o aplicarlo DESPUÉS de evaluar salidas y
+    que rija desde la vela siguiente; y comprobar que el nuevo SL sea < low (BUY) / > high (SELL) de la vela.
+
+F3. Tamaño del script (Alta · muy probable)
+    Aportes densos: ~110 líneas FUSION, ~150 líneas zonas/checklist/historial, ~30 tablero IA, dashboard ampliado.
+    Sin podar nada de lo que ya no se usa (ux*, exec*V72, continuation*Score, prevent*/runnerNow, retest*, stars,
+    f_barV63, f_tfBgV63, manualNewsTitle/Level, imgMaxZonesV76, fusionUseFibRetrace, imgZoneAliveV76...).
+    Recomendación: aplicar la misma poda automática que en V77.2 (≈130 líneas) antes de seguir añadiendo capas.
+
+F5. Fib sin dirección (Media-alta)
+    fibLegHighV77/LowV77 = highest/lowest(24). fibBuy618 = high − 0,618·rango. Si el máximo está al principio y
+    el mínimo al final (tramo bajista), la "zona BUY 61.8–70.5" queda a un 30–38 % del suelo: no es retroceso de
+    impulso alcista, es un rebote en tendencia bajista. Como inFibBuyV77 entra en score, strongDemand, reaction y
+    confirmed, el gate se abre en contra del impulso. Corrección: exigir que el pivote bajo sea anterior al alto
+    (ta.barssince o comparar bar_index de highestbars/lowestbars) para BUY, y al revés para SELL.
+
+F6. Breakeven por SL dinámico contado como pérdida (Media)
+    progR ≥ 1,15 mueve el SL a la entrada; si el stop salta ahí sin haber tocado TP1 (TP1 puede estar > 1,15R),
+    closeBuyV75 suma statsLossV75. Un cierre a 0R se cuenta como fallo. Añadir categoría "BE" en la estadística.
+
+F7. Redundancias que dificultan afinar (Baja)
+    hardPoiBuyV77 ≈ antiTopBuy ≈ tercer término de buyChaseBlockV74. spaceBuyV77 ≈ buySpaceOkV73 ≈ buyRoomAtrV74.
+    chopFusion se resta en score y además bloquea; lateralWait sigue existiendo aparte.
+
+F8. Alerta sin datos Fusion (Baja)
+    f_msgV73 no incluye fusionModeBuy/Sell, reaction/confirmedQuality ni chopFusion. El JSON manda el score
+    "exec_score" nuevo sin decir que la escala cambió.
+
+Heredados sin cambios de V77.1 (ver AUDITORIA_IMPULXOR_V77_1.txt): L1 datos HTF (lookahead), L2 zonas solapadas,
+L3 TP1 desde la zona, L6 TP/SL misma vela, L7 swing fuera del motor, L8 dos rastreadores de OB, L9 distancia POI
+un solo lado, L10 ictBSL obsoleto, L11 filtros decorativos, L12 estados intrabarra / salidas de una vela / PRE
+alertas sin enfriamiento, L13 "ASERTIVIDAD" = confluencia y peso MTF 110, L14 TP2 a liquidez H3/H4.
+Nota: el bug L4 (nacimiento sobrescrito cada vela) aquí no tiene efecto porque el historial por zona V771 no
+existe; la caja usa pointBuyIdV75 (nacimiento del OB/FVG) como borde izquierdo, que sí es estable.
+
+
+4. HALLAZGOS VISUALES
+---------------------
+
+V-A. Solapamiento derecho (Alta)
+     imgRightV76 pasa a position.top_right con 17 filas y fusionDashV77 va en position.middle_right (7 filas).
+     Un panel de 17 filas desde arriba ocupa más de la mitad del pane en la mayoría de pantallas: el tablero IA
+     queda debajo del panel derecho o lo pisa. zoneHistoryDashV77 (bottom_right, 10 filas con \n) puede tocar
+     también al tablero IA en panes bajos. Hay que decidir un solo anclaje por lado o fusionar IA·LB·LS en el
+     panel derecho.
+
+V-B. Dos cajas a la vez (Alta · directriz 1)
+     f_imgDrawObjectsV76 marca "lead" a la primera caja de cada dirección: siempre una BUY y una SELL con borde
+     sólido y etiqueta. La tabla CHECKLIST · ZONAS sí elige una preferida (plan), pero el gráfico no.
+
+V-C. Lado incoherente residual (Media)
+     imgPlanSideV76 (planDirV73) se usa en ENTRADA/OBJETIVO/STOP; imgSideLongV76 (imgDirV76, con respaldo al
+     sesgo MTF) se usa en semáforo, ZONA ACTUAL, SESGO y PRÓXIMA ACCIÓN. Con estado neutro y CORE ≠ sesgo puede
+     leerse "BUSCANDO ZONA BUY (COMPRA)" junto a "ENTRADA SELL (VENTA)".
+
+V-D. Etiquetas históricas y POINTS acumulados (Media · directriz 0/10)
+     plotshape BUY/SELL activos en dashboard (bien para auditar) y POINTS "▲ BUY/COMPRA xx%" ahora también en
+     dashboard, hasta 60 etiquetas. Contradice la política "sin etiquetas antiguas" que se pidió. Si se conservan,
+     que sea con un input que lo diga ("marcadores históricos").
+
+V-E. Caja de zona con poca información (Media · directriz 4)
+     La caja muestra "COMPRA (BUY) xx%" y el rango; confluencias, toques y reacción solo aparecen en la tabla
+     bottom_right, lejos de la zona. Además f_imgZoneOpenV76 pinta el texto tiny dentro de la caja y luego
+     f_imgDrawObjectsV76 lo borra en la última vela: dos estilos para el mismo objeto.
+
+V-F. Paleta del tablero IA (Baja)
+     Usa color.lime/red/silver/aqua/orange y fondo rgb(7,9,18) en lugar de imgGreenV76/imgRedV76/imgBgV76: se ve
+     como un panel de otro indicador.
+
+V-G. Espaciador opaco (Baja)
+     imgStructV76 mantiene la fila "" con height=9 sobre fondo opaco imgBgV76 → bloque navy vacío. En la
+     cabecera sí se hizo bien (tabla con fondo transparente).
+
+V-H. Inputs sin efecto (Baja)
+     fusionUseFibRetrace no se lee en ninguna parte. imgMaxZonesV76 tiene minval=maxval=2 y no se usa.
+     manualNewsTitleV63/LevelV63 siguen sin uso. imgZoneAliveV76 nunca pasa a false.
+
+Lo que está bien: semáforo con una sola cadena (texto/color/sub coherentes), cajas al 82–86, plan dibujado a la
+izquierda de la vela (no bajo el panel), etiqueta OBJETIVO y rango en anclajes distintos, marca de agua fuera del
+dashboard, checklist por zona con TOQUE/REAC/ESTR/ENTR e historial textual sin cajas viejas.
+
+
+5. RIESGOS DE COMPILACIÓN DETECTADOS EN LECTURA
+-----------------------------------------------
+
+- Tamaño (F3). Es el bloqueo más probable al pegar.
+- No se ven usos antes de declarar: las funciones de zona usan f_uiRangeV76/f_uiPctV76 definidas antes;
+  f_imgZonesUpdateV76 usa reactionBuyV77/confirmedBuyV77/enterBuyNowV73 definidos antes. str.format_time,
+  box.get_left, array.remove y label.style_label_lower_right existen en v6.
+- f_imgZonesUpdateV76 corre en TODAS las velas (no solo en la última): crea/borra cajas en histórico. Correcto para
+  que el checklist funcione, pero cada cambio de zona hace box.new + box.delete; dentro del límite de 250.
+- table.merge_cells repetido en cada tick sobre rangos idénticos: funciona en la práctica; si el editor avisa,
+  merge solo una vez con un var bool.
+
+
+6. CUMPLIMIENTO DE LAS 12 DIRECTRICES
+-------------------------------------
+
+  0  Todo vivo, nada muerto            PARCIAL   Mucho código heredado sin uso + 4 inputs inertes (V-H).
+  1  Una sola zona                     NO        Una BUY y una SELL siempre (V-B).
+  2  POI coherente                     PARCIAL   Plan sí; semáforo/zona/sesgo con imgDirV76 (V-C).
+  3  Mínimo dos confluencias           NO        La caja sale con calidad ≥ 60 y OB o FVG; strongDemand no la gobierna.
+  4  Zona informativa                  PARCIAL   Dirección, % y rango; el resto en otra tabla (V-E).
+  5  Verde/rojo · info a la izquierda  SÍ        Cajas translúcidas, plan y etiquetas a la izquierda.
+  6  Rutas vivas                       NO        No existen.
+  7  Posición madre y reentradas       NO        No existen; el motor sigue reversando con entrada contraria.
+  8  Gestión del swing                 NO        No existe (el SL dinámico es gestión automática, no lectura).
+  9  Checklist TP1–TP5                 NO        Solo checklist de zona TOQUE/REAC/ESTR/ENTR.
+ 10  Historial compacto                PARCIAL   Historial de zonas en bottom_right; sin casos/TP1+ en dashboard.
+ 11  No "IA que aprende"               NO        "SCANNER IA", "FUSION IA", "IA = decisión operativa"; sin nota.
+ 12  Motor protegido                   NO        Score, gates, chop y SL dinámico cambian entradas y cierres (F1, F2).
+
+
+7. RECOMENDACIÓN
+----------------
+
+1) Decidir explícitamente si FUSION es el nuevo motor. Si sí, retirar la directriz 12 de los requisitos y
+   documentar los umbrales; si no, mover chop/gate/spaceV77 a "lectura" y dejar enterBuyRawV73 original.
+2) Corregir F2 (SL dinámico con close[1] y evaluación tras salidas) y F5 (fib con dirección) antes de mirar la
+   estadística: ambos la deforman.
+3) Podar código muerto (F3) con la misma pasada automática de V77.2; sin eso es probable que no compile.
+4) Unificar anclajes: un solo panel derecho (fusionar IA·LB·LS en imgRightV76) y una sola caja de zona (elegir
+   con la prioridad viva → plan → mejor lectura, como en V77.2).
+5) Portar de V77.2: lado único desde planDirV73, rutas SCALPING/INTRADÍA/SWING, posición madre/reentrada,
+   checklist TP 1□–5□ y HISTORIAL VIVO con nota de la directriz 11. Portar de esta versión a V77.2: checklist por
+   zona TOQUE/REAC/ESTR/ENTR, historial textual de zonas, plan dibujado a la izquierda y semáforo con stateTxtV73.
+6) Enviar el archivo como .txt para correr los chequeos automáticos (referencias, uso antes de declarar, tamaño).
