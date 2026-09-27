@@ -318,3 +318,17 @@ Archivo resultante: `IMPULXOR_V77_2_PINE.txt`. Principio rector: **todo lo visib
 ### Pendiente a propósito (cambiaría entradas o cierres; requiere decisión del usuario)
 
 L1 datos HTF (`lookahead` / rango del día), L2 zonas solapadas, L3 TP1 desde la entrada, L6 orden TP/SL en la misma vela, L7 estructura swing en el motor, L8 unificar rastreadores de OB, L9 distancia al POI por ambos lados, L10 `ictBSL` obsoleto, L14 tope al salto de TP2. Todos alterarían el gatillo o los cierres que la directriz 12 protege. La estadística mostrada sigue heredando los sesgos de L1, L3 y L6 hasta que se decida abordarlos.
+
+### Nota de compilación (V77.2, tras la prueba en TradingView)
+
+1) Error "Undeclared identifier liveSlProtectedV75" (L1572): la captura del último cierre usaba una variable declarada
+   más abajo. Corregido calculándola en línea con liveSlV73 y liveSlOrigV75.
+2) Error "Compiled code contains too many tokens: 103864 (límite 100256)": el script ya estaba al límite en V77.1 y las
+   capas nuevas lo superaron. Se recuperó margen eliminando solo código sin efecto:
+   - 129 líneas de definiciones nunca leídas (análisis transitivo: ux*, exec*V72, continuation*Score, prevent*/runnerNow,
+     stars/starsNum/f_barV63/f_tfBgV63, retest*, etc.).
+   - Capas decorativas desactivadas por defecto o marcadas "legacy" y sus inputs: "Mostrar caja mapa" (V67),
+     "Mostrar aviso vivo (legacy)", "Mapa de calor / liquidez" + lookback/bins (V63), "Zona de reacción viva",
+     "Última absorción", "Última vela explosiva (legacy)", "Noticia próxima" e "Impacto noticia" (nunca se leían).
+   Resultado: ~9 % menos tokens de código que la versión que falló y ~6 % menos que V77.1. Motor, alertas, POI,
+   estructura, panel legacy y todo el Dashboard V77.2 intactos (verificado por diff de las fórmulas del motor).
